@@ -1,0 +1,14 @@
+{
+  "num_nodes": 5,
+  "node_cpu_capacity": 4,
+  "node_mem_capacity": 8192,
+  "pod_cpu_request": 250,
+  "pod_mem_request": 128,
+  "pod_cpu_limit": 500,
+  "pod_mem_limit": 256,
+  "crash_loop_failure_rate": 0.7,
+  "oom_kill_failure_rate": 0.6,
+  "node_failure_rate": 0.3,
+  "cascade_failure_probability": 0.5,
+  "task_timeout_values": 300
+}
