@@ -13,7 +13,9 @@ tags:
 
 # Coenv Environment
 
-A simple test environment that echoes back messages. Perfect for testing the env APIs as well as demonstrating environment usage patterns.
+A Kubernetes incident-response simulation environment for OpenEnv.
+
+The environment exposes realistic cluster state (nodes, pods, deployments, services, events) and supports operational actions such as scaling, restarting rollouts, patching resources, setting HPA, and draining nodes.
 
 ## Quick Start
 
@@ -26,19 +28,22 @@ try:
     # Create environment from Docker image
     COEnvenv = CoenvEnv.from_docker_image("COEnv-env:latest")
 
-    # Reset
-    result = COEnvenv.reset()
-    print(f"Reset: {result.observation.echoed_message}")
+    # Reset with a task
+    result = COEnvenv.reset(task="pod_recovery")
+    print(f"Objective: {result.observation.objective}")
+    print(f"Pods observed: {len(result.observation.pods)}")
 
-    # Send multiple messages
-    messages = ["Hello, World!", "Testing echo", "Final message"]
-
-    for msg in messages:
-        result = COEnvenv.step(CoenvAction(message=msg))
-        print(f"Sent: '{msg}'")
-        print(f"  → Echoed: '{result.observation.echoed_message}'")
-        print(f"  → Length: {result.observation.message_length}")
-        print(f"  → Reward: {result.reward}")
+    # Example remediation action
+    result = COEnvenv.step(
+        CoenvAction(
+            action_type="scale",
+            deployment="frontend",
+            replicas=3,
+        )
+    )
+    print(f"Step: {result.observation.step}")
+    print(f"Reward: {result.reward}")
+    print(f"Done: {result.done}")
 
 finally:
     # Always clean up
@@ -119,22 +124,31 @@ The deployed space includes:
 ## Environment Details
 
 ### Action
-**CoenvAction**: Contains a single field
-- `message` (str) - The message to echo back
+**CoenvAction** supports the following `action_type` values:
+- `scale`
+- `delete_pod`
+- `patch`
+- `rollout_restart`
+- `set_hpa`
+- `drain_node`
+- `describe`
+
+Action-specific fields include `deployment`, `replicas`, `pod_name`, `resource_type`, `name`, `patch`, `min_replicas`, `max_replicas`, `cpu_target_percent`, and `node_name`.
 
 ### Observation
-**CoenvObservation**: Contains the echo response and metadata
-- `echoed_message` (str) - The message echoed back
-- `message_length` (int) - Length of the message
-- `reward` (float) - Reward based on message length (length × 0.1)
-- `done` (bool) - Always False for echo environment
-- `metadata` (dict) - Additional info like step count
+**CoenvObservation** contains a typed cluster snapshot and episode metadata:
+- `nodes`, `pods`, `deployments`, `services`, `configmaps`, `hpas`, `events`
+- `step` (int)
+- `objective` (str)
+- `reward` (float)
+- `done` (bool)
+- `metadata` (dict)
 
 ### Reward
-The reward is calculated as: `message_length × 0.1`
-- "Hi" → reward: 0.2
-- "Hello, World!" → reward: 1.3
-- Empty message → reward: 0.0
+Reward is task-dependent and based on service health progression:
+- `pod_recovery`: fraction of frontend pods in Running state
+- `autoscaling`: backend availability progress
+- `incident`: proportion of key services restored to healthy
 
 ## Advanced Usage
 
@@ -143,14 +157,16 @@ The reward is calculated as: `message_length × 0.1`
 If you already have a Coenv environment server running, you can connect directly:
 
 ```python
-from COEnv import CoenvEnv
+from COEnv import CoenvAction, CoenvEnv
 
 # Connect to existing server
 COEnvenv = CoenvEnv(base_url="<ENV_HTTP_URL_HERE>")
 
 # Use as normal
-result = COEnvenv.reset()
-result = COEnvenv.step(CoenvAction(message="Hello!"))
+result = COEnvenv.reset(task="incident")
+result = COEnvenv.step(
+    CoenvAction(action_type="describe", resource_type="deployment", name="api-gateway")
+)
 ```
 
 Note: When connecting to an existing server, `COEnvenv.close()` will NOT stop the server.
@@ -164,12 +180,14 @@ from COEnv import CoenvAction, CoenvEnv
 
 # Connect with context manager (auto-connects and closes)
 with CoenvEnv(base_url="http://localhost:8000") as env:
-    result = env.reset()
-    print(f"Reset: {result.observation.echoed_message}")
+    result = env.reset(task="autoscaling")
+    print(f"Reset objective: {result.observation.objective}")
     # Multiple steps with low latency
-    for msg in ["Hello", "World", "!"]:
-        result = env.step(CoenvAction(message=msg))
-        print(f"Echoed: {result.observation.echoed_message}")
+    for replicas in [3, 4, 5]:
+        result = env.step(
+            CoenvAction(action_type="scale", deployment="backend", replicas=replicas)
+        )
+        print(f"Replicas set to {replicas}, reward={result.reward}")
 ```
 
 The client uses WebSocket connections for:
@@ -200,10 +218,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 def run_episode(client_id: int):
     with CoenvEnv(base_url="http://localhost:8000") as env:
-        result = env.reset()
+        result = env.reset(task="pod_recovery")
         for i in range(10):
-            result = env.step(CoenvAction(message=f"Client {client_id}, step {i}"))
-        return client_id, result.observation.message_length
+            result = env.step(
+                CoenvAction(action_type="describe", resource_type="deployment", name="frontend")
+            )
+        return client_id, result.observation.step
 
 # Run 4 episodes concurrently
 with ThreadPoolExecutor(max_workers=4) as executor:

@@ -54,9 +54,7 @@ class CoenvEnv(
         Returns:
             Dictionary representation suitable for JSON encoding
         """
-        return {
-            "message": action.message,
-        }
+        return action.model_dump(exclude_none=True)
 
     def _parse_result(self, payload: Dict) -> StepResult[CoenvObservation]:
         """
@@ -70,11 +68,10 @@ class CoenvEnv(
         """
         obs_data = payload.get("observation", {})
         observation = CoenvObservation(
-            echoed_message=obs_data.get("echoed_message", ""),
-            message_length=obs_data.get("message_length", 0),
+            **obs_data,
             done=payload.get("done", False),
             reward=payload.get("reward"),
-            metadata=obs_data.get("metadata", {}),
+            metadata=payload.get("info", {}),
         )
 
         return StepResult(
@@ -95,5 +92,5 @@ class CoenvEnv(
         """
         return State(
             episode_id=payload.get("episode_id"),
-            step_count=payload.get("step_count", 0),
+            step_count=payload.get("step_count", payload.get("step", 0)),
         )
