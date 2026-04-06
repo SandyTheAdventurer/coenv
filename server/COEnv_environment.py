@@ -8,13 +8,13 @@ This is the brain of the whole project.
 from typing import Dict, List, Any, Optional, Literal
 from datetime import datetime
 import numpy as np
-import time
 
 from .models import (
     NodeStatus, PodStatus, DeploymentStatus, ServiceStatus, 
-    ClusterEvent, ClusterObservation, KubeAction, RewardSignal,
+    ClusterEvent, ClusterObservation,
     ConfigMapStatus, HPAStatus
 )
+from .utils import set_random_seed
 
 
 class World:
@@ -24,6 +24,7 @@ class World:
         self.config = config
         self.seed = seed
         self.rng = np.random.default_rng(seed)
+        set_random_seed(seed)
         self.cluster_state = self._initialize_healthy_cluster()
         self.step_count = 0
         self.events = []

@@ -7,7 +7,7 @@ Makes the simulation feel realistic and non-deterministic in the right ways.
 import numpy as np
 import math
 from typing import Dict, List, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 
 
 _RNG = np.random.default_rng()

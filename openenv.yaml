@@ -1,7 +1,7 @@
 name: coenv
 version: 0.1.0
 description: Kubernetes Cluster Simulator for OpenEnv RL Hackathon
-entrypoint: server/app.py
+entrypoint: server.app:app
 inference: inference.py
 endpoints:
   reset: /reset
@@ -15,6 +15,6 @@ tasks:
   - id: incident
     difficulty: hard
 artifacts:
-  action_schema: server/actions/
-  observation_schema: server/models.py
+  action_schema: models.py
+  observation_schema: models.py
   reward_schema: server/models.py
