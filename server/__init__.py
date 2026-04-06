@@ -1,11 +1,25 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+"""COEnv - Kubernetes Cluster Simulator for OpenEnv"""
 
-"""Coenv environment server components."""
+__version__ = "0.1.0"
 
-from .COEnv_environment import CoenvEnvironment
+from .COEnv_environment import World
+from .models import (
+    ClusterObservation,
+    RewardSignal,
+    KubeAction,
+    PodStatus,
+    NodeStatus,
+    DeploymentStatus,
+    ServiceStatus
+)
 
-__all__ = ["CoenvEnvironment"]
+__all__ = [
+    "World",
+    "ClusterObservation",
+    "RewardSignal",
+    "KubeAction",
+    "PodStatus",
+    "NodeStatus",
+    "DeploymentStatus",
+    "ServiceStatus"
+]
