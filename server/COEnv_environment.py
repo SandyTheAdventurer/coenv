@@ -7,7 +7,7 @@ This is the brain of the whole project.
 
 from typing import Dict, List, Any, Optional, Literal
 from datetime import datetime
-import random
+import numpy as np
 import time
 
 from .models import (
@@ -20,12 +20,19 @@ from .models import (
 class World:
     """In-memory Kubernetes cluster simulator"""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], seed: Optional[int] = None):
         self.config = config
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
         self.cluster_state = self._initialize_healthy_cluster()
         self.step_count = 0
         self.events = []
         self._event_counter = 0
+
+    def _random_suffix(self, length: int = 5) -> str:
+        """Generate a random lowercase alphabetic suffix."""
+        letters = self.rng.integers(97, 123, size=length)
+        return "".join(chr(int(code)) for code in letters)
         
     def _initialize_healthy_cluster(self) -> Dict[str, List[Dict]]:
         """Initialize a healthy cluster state based on config"""
@@ -67,7 +74,7 @@ class World:
             
             # Create pods for this deployment
             for j in range(dep["replicas"]):
-                pod_name = f"{dep['name']}-{random.randint(1000, 9999)}-{''.join([chr(random.randint(97, 122)) for _ in range(5)])}"
+                pod_name = f"{dep['name']}-{int(self.rng.integers(1000, 10000))}-{self._random_suffix()}"
                 pods.append({
                     "name": pod_name,
                     "status": "Running",
@@ -140,9 +147,28 @@ class World:
     
     def get_pods(self, namespace: Optional[str] = None, selector: Optional[Dict[str, str]] = None) -> List[PodStatus]:
         """Returns filtered pod list (mimics kubectl get pods)"""
-        pods = [PodStatus(**pod) for pod in self.cluster_state["pods"]]
-        # Simple filtering by namespace (not fully implemented - just returns all for now)
-        return pods
+        filtered_pods = self.cluster_state["pods"]
+
+        if namespace is not None:
+            filtered_pods = [
+                pod for pod in filtered_pods
+                if pod.get("namespace", "default") == namespace
+            ]
+
+        if selector:
+            for key, value in selector.items():
+                if key in {"app", "deployment"}:
+                    filtered_pods = [
+                        pod for pod in filtered_pods
+                        if pod.get("deployment") == value
+                    ]
+                else:
+                    filtered_pods = [
+                        pod for pod in filtered_pods
+                        if pod.get("labels", {}).get(key) == value
+                    ]
+
+        return [PodStatus(**pod) for pod in filtered_pods]
     
     def get_nodes(self) -> List[NodeStatus]:
         """Get all nodes as Pydantic models"""
@@ -230,7 +256,7 @@ class World:
             for i in range(desired_replicas - current_count):
                 deployment = next((d for d in self.cluster_state["deployments"] if d["name"] == deployment_name), None)
                 if deployment:
-                    pod_name = f"{deployment_name}-{random.randint(1000, 9999)}-{''.join([chr(random.randint(97, 122)) for _ in range(5)])}"
+                    pod_name = f"{deployment_name}-{int(self.rng.integers(1000, 10000))}-{self._random_suffix()}"
                     node = nodes[i % len(nodes)] if nodes else None
                     self.cluster_state["pods"].append({
                         "name": pod_name,
@@ -266,7 +292,7 @@ class World:
             
             event_type: Literal["Normal"] = "Normal"  # type: ignore
             event = ClusterEvent(
-                event_id=f"event-delpod-{random.randint(1000, 9999)}",
+                event_id=f"event-delpod-{int(self.rng.integers(1000, 10000))}",
                 timestamp=datetime.now().isoformat(),
                 type=event_type,
                 reason="UserDeleted",
@@ -286,7 +312,7 @@ class World:
         for pod in pods_to_delete:
             event_type: Literal["Normal"] = "Normal"  # type: ignore
             event = ClusterEvent(
-                event_id=f"event-restart-{random.randint(1000, 9999)}",
+                event_id=f"event-restart-{int(self.rng.integers(1000, 10000))}",
                 timestamp=datetime.now().isoformat(),
                 type=event_type,
                 reason="RolledOut",
@@ -299,6 +325,155 @@ class World:
         self.cluster_state["pods"] = [p for p in self.cluster_state["pods"] if p.get("deployment") != deployment]
         
         return True
+
+    def set_hpa(self, deployment: str, min_replicas: int, max_replicas: int, cpu_target_percent: int) -> bool:
+        """Create or update an HPA configuration for a deployment."""
+        target_deployment = next(
+            (d for d in self.cluster_state["deployments"] if d["name"] == deployment),
+            None,
+        )
+        if target_deployment is None:
+            return False
+
+        hpa_name = f"{deployment}-hpa"
+        now = datetime.now().isoformat()
+
+        existing_hpa = next((h for h in self.cluster_state["hpas"] if h.get("name") == hpa_name), None)
+        if existing_hpa is None:
+            self.cluster_state["hpas"].append({
+                "name": hpa_name,
+                "min_replicas": min_replicas,
+                "max_replicas": max_replicas,
+                "current_replicas": max(min_replicas, min(target_deployment["desired_replicas"], max_replicas)),
+                "cpu_target_percent": cpu_target_percent,
+                "last_updated": now,
+            })
+        else:
+            existing_hpa.update({
+                "min_replicas": min_replicas,
+                "max_replicas": max_replicas,
+                "cpu_target_percent": cpu_target_percent,
+                "current_replicas": max(min_replicas, min(target_deployment["desired_replicas"], max_replicas)),
+                "last_updated": now,
+            })
+
+        # Keep the deployment desired replicas within configured HPA bounds.
+        bounded_replicas = max(min_replicas, min(target_deployment["desired_replicas"], max_replicas))
+        target_deployment["desired_replicas"] = bounded_replicas
+        target_deployment["last_updated"] = now
+
+        event_type: Literal["Normal"] = "Normal"  # type: ignore
+        self.events.append(ClusterEvent(
+            event_id=f"event-hpa-{int(self.rng.integers(1000, 10000))}",
+            timestamp=now,
+            type=event_type,
+            reason="HorizontalPodAutoscalerUpdated",
+            message=(
+                f"HPA configured for deployment/{deployment}: "
+                f"min={min_replicas}, max={max_replicas}, cpu_target={cpu_target_percent}%"
+            ),
+            involved_object=deployment,
+        ))
+
+        return True
+
+    def drain_node(self, node_name: str) -> bool:
+        """Mark a node unschedulable and evict/reschedule pods currently on it."""
+        node = next((n for n in self.cluster_state["nodes"] if n["name"] == node_name), None)
+        if node is None:
+            return False
+
+        node["status"] = "SchedulingDisabled"
+        node["last_updated"] = datetime.now().isoformat()
+
+        candidate_nodes = [
+            n for n in self.cluster_state["nodes"]
+            if n["name"] != node_name and n.get("status") == "Ready"
+        ]
+
+        pods_on_node = [p for p in self.cluster_state["pods"] if p.get("node") == node_name]
+        for i, pod in enumerate(pods_on_node):
+            replacement = candidate_nodes[i % len(candidate_nodes)] if candidate_nodes else None
+            pod["node"] = replacement["name"] if replacement else None
+            pod["status"] = "Pending"
+            pod["last_updated"] = datetime.now().isoformat()
+
+            event_type: Literal["Normal"] = "Normal"  # type: ignore
+            self.events.append(ClusterEvent(
+                event_id=f"event-evict-{int(self.rng.integers(1000, 10000))}",
+                timestamp=datetime.now().isoformat(),
+                type=event_type,
+                reason="Evicted",
+                message=f"pod/{pod['name']} evicted from drained node/{node_name}",
+                involved_object=pod["name"],
+            ))
+
+        event_type: Literal["Normal"] = "Normal"  # type: ignore
+        self.events.append(ClusterEvent(
+            event_id=f"event-drain-{int(self.rng.integers(1000, 10000))}",
+            timestamp=datetime.now().isoformat(),
+            type=event_type,
+            reason="NodeDrained",
+            message=f"node/{node_name} cordoned and drained",
+            involved_object=node_name,
+        ))
+
+        return True
+
+    def describe(self, resource_type: str, name: str) -> Dict[str, Any]:
+        """Return kubectl-describe style details for a specific resource."""
+        collection_map = {
+            "deployment": "deployments",
+            "pod": "pods",
+            "node": "nodes",
+            "service": "services",
+            "configmap": "configmaps",
+            "hpa": "hpas",
+        }
+
+        collection_name = collection_map.get(resource_type)
+        if collection_name is None:
+            return {
+                "type": resource_type,
+                "name": name,
+                "found": False,
+                "error": f"Unsupported resource_type: {resource_type}",
+            }
+
+        resource = next(
+            (item for item in self.cluster_state.get(collection_name, []) if item.get("name") == name),
+            None,
+        )
+        if resource is None:
+            return {
+                "type": resource_type,
+                "name": name,
+                "found": False,
+                "error": f"{resource_type} '{name}' not found",
+            }
+
+        related_pods = []
+        if resource_type == "deployment":
+            related_pods = [p for p in self.cluster_state["pods"] if p.get("deployment") == name]
+        elif resource_type == "node":
+            related_pods = [p for p in self.cluster_state["pods"] if p.get("node") == name]
+        elif resource_type == "service":
+            selector_app = resource.get("selector", {}).get("app")
+            if selector_app:
+                related_pods = [p for p in self.cluster_state["pods"] if p.get("deployment") == selector_app]
+
+        related_events = [e.model_dump() for e in self.events if e.involved_object in {name, resource_type}]
+
+        return {
+            "type": resource_type,
+            "name": name,
+            "found": True,
+            "resource": dict(resource),
+            "related_pods": related_pods,
+            "recent_events": related_events[-10:],
+            "step": self.step_count,
+            "timestamp": datetime.now().isoformat(),
+        }
     
     def tick(self):
         """Advances simulated time by one step. Pods in CrashLoopBackOff increment their restart counter. Pending pods on ready nodes eventually transition to Running. Dead nodes stay dead unless drained."""
@@ -306,8 +481,8 @@ class World:
         
         # Simulate some natural changes in resource usage
         for node in self.cluster_state["nodes"]:
-            node["cpu_usage"] = max(0, min(100, node["cpu_usage"] + random.uniform(-5, 5)))
-            node["mem_usage"] = max(0, min(100, node["mem_usage"] + random.uniform(-5, 5)))
+            node["cpu_usage"] = max(0, min(100, node["cpu_usage"] + float(self.rng.uniform(-5, 5))))
+            node["mem_usage"] = max(0, min(100, node["mem_usage"] + float(self.rng.uniform(-5, 5))))
             node["last_updated"] = datetime.now().isoformat()
         
         # Update pod statuses based on node status
@@ -321,7 +496,7 @@ class World:
                     elif pod["status"] == "Pending":
                         pod["status"] = "Unknown"
                 elif node and node["status"] == "Ready" and pod["status"] == "Pending":
-                    if random.random() > 0.7:
+                    if float(self.rng.random()) > 0.7:
                         pod["status"] = "Running"
             pod["last_updated"] = datetime.now().isoformat()
         
@@ -341,7 +516,7 @@ class World:
             if current_count < desired:
                 nodes = self.cluster_state["nodes"]
                 for i in range(desired - current_count):
-                    pod_name = f"{deployment['name']}-{random.randint(1000, 9999)}-{''.join([chr(random.randint(97, 122)) for _ in range(5)])}"
+                    pod_name = f"{deployment['name']}-{int(self.rng.integers(1000, 10000))}-{self._random_suffix()}"
                     node = nodes[i % len(nodes)] if nodes else None
                     self.cluster_state["pods"].append({
                         "name": pod_name,
@@ -357,7 +532,7 @@ class World:
                     })
         
         # Generate occasional events
-        if random.random() < 0.3:
+        if float(self.rng.random()) < 0.3:
             self._generate_event()
     
     def _generate_event(self):
@@ -373,7 +548,7 @@ class World:
             {"type": "Normal", "reason": "Killing", "message": "Stopping container"}
         ]
         
-        event = random.choice(event_types)
+        event = self.rng.choice(event_types)
         involved_objects = []
         involved_objects.extend([p["name"] for p in self.cluster_state["pods"][:3]])
         involved_objects.extend([d["name"] for d in self.cluster_state["deployments"][:3]])
@@ -389,7 +564,7 @@ class World:
             type=event_type,
             reason=event["reason"],
             message=event["message"],
-            involved_object=random.choice(involved_objects)
+            involved_object=str(self.rng.choice(involved_objects))
         ))
         self._event_counter += 1
         

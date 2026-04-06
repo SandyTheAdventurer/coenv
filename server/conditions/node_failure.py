@@ -4,7 +4,6 @@ NodeFailureCondition - Simulates node outages and scheduling disruption
 
 from typing import Dict, List, Any, Optional
 from ..COEnv_environment import World
-import random
 
 
 class NodeFailureCondition:
@@ -32,7 +31,7 @@ class NodeFailureCondition:
         if target_node:
             target_nodes = [n for n in nodes if n.name == target_node]
         else:
-            target_nodes = [n for n in nodes if failure_rate is not None and random.random() < failure_rate]
+            target_nodes = [n for n in nodes if failure_rate is not None and float(self.world.rng.random()) < failure_rate]
             
         for node in target_nodes:
             patch = {
@@ -54,11 +53,11 @@ class NodeFailureCondition:
     
     def _add_node_failure_event(self, node_name: str):
         """Add a node failure event"""
-        from models import ClusterEvent
+        from ..models import ClusterEvent
         from datetime import datetime
         
         event = ClusterEvent(
-            event_id=f"event-nodefail-{random.randint(1000, 9999)}",
+            event_id=f"event-nodefail-{int(self.world.rng.integers(1000, 10000))}",
             timestamp=datetime.now().isoformat(),
             type="Warning",
             reason="NodeNotReady",

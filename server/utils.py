@@ -4,10 +4,19 @@ Random failure rate generators, latency simulators, resource usage curves.
 Makes the simulation feel realistic and non-deterministic in the right ways.
 """
 
-import random
+import numpy as np
 import math
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
+
+
+_RNG = np.random.default_rng()
+
+
+def set_random_seed(seed: Optional[int]) -> None:
+    """Set module-level RNG seed for deterministic utility behavior."""
+    global _RNG
+    _RNG = np.random.default_rng(seed)
 
 
 class ProbabilityHelpers:
@@ -17,23 +26,15 @@ class ProbabilityHelpers:
     def weighted_random_choice(choices: List[Any], weights: List[float]) -> Any:
         """Make a weighted random choice"""
         if not choices or not weights or len(choices) != len(weights):
-            return random.choice(choices) if choices else None
+            return _RNG.choice(choices) if choices else None
         
         # Normalize weights
         total_weight = sum(weights)
         if total_weight == 0:
-            return random.choice(choices)
+            return _RNG.choice(choices)
         
         normalized_weights = [w / total_weight for w in weights]
-        
-        # Make choice
-        r = random.random()
-        cumulative_weight = 0
-        for choice, weight in zip(choices, normalized_weights):
-            cumulative_weight += weight
-            if r <= cumulative_weight:
-                return choice
-        return choices[-1]  # Fallback
+        return _RNG.choice(choices, p=normalized_weights)
     
     @staticmethod
     def exponential_backoff(attempt: int, base_delay: float = 1.0, max_delay: float = 60.0) -> float:
@@ -44,8 +45,7 @@ class ProbabilityHelpers:
     @staticmethod
     def poisson_arrival_rate(lambda_rate: float, time_window: float) -> int:
         """Generate number of events in time window using Poisson distribution"""
-        # Simple approximation - in reality would use numpy.random.poisson
-        return int(lambda_rate * time_window + random.gauss(0, math.sqrt(lambda_rate * time_window)))
+        return int(_RNG.poisson(max(lambda_rate * time_window, 0)))
     
     @staticmethod
     def failure_probability_over_time(base_rate: float, time_elapsed: float, 
@@ -57,7 +57,7 @@ class ProbabilityHelpers:
     @staticmethod
     def random_failure_rate(min_rate: float = 0.1, max_rate: float = 0.9) -> float:
         """Generate a random failure rate within bounds"""
-        return random.uniform(min_rate, max_rate)
+        return float(_RNG.uniform(min_rate, max_rate))
 
 
 class LatencySimulator:
@@ -75,7 +75,7 @@ class LatencySimulator:
         """Get simulated latency in milliseconds"""
         # Base latency + load-dependent component + random jitter
         load_latency = self.base_latency_ms * (self.load_factor - 1.0) * 2
-        jitter = random.gauss(0, self.base_latency_ms * 0.1)
+        jitter = float(_RNG.normal(0, self.base_latency_ms * 0.1))
         latency = self.base_latency_ms + max(0, load_latency) + jitter
         return max(1.0, latency)  # Minimum 1ms latency
     
@@ -83,7 +83,7 @@ class LatencySimulator:
                              spike_multiplier: float = 5.0) -> float:
         """Get latency with occasional spikes"""
         latency = self.get_latency()
-        if random.random() < spike_probability:
+        if float(_RNG.random()) < spike_probability:
             latency *= spike_multiplier
         return latency
 
@@ -92,7 +92,7 @@ class ResourceUsageSimulator:
     """Simulates realistic CPU and memory usage patterns"""
     
     def __init__(self):
-        self.time_offset = random.uniform(0, 2 * math.pi)
+        self.time_offset = float(_RNG.uniform(0, 2 * math.pi))
         
     def get_cpu_usage(self, base_usage: float = 0.3, 
                      variation: float = 0.2) -> float:
@@ -102,7 +102,7 @@ class ResourceUsageSimulator:
         daily_pattern = 0.5 * math.sin(2 * math.pi * time_factor / 24) + 0.5
         
         usage = base_usage + variation * daily_pattern
-        usage += random.gauss(0, 0.05)  # Noise
+        usage += float(_RNG.normal(0, 0.05))  # Noise
         return max(0.0, min(1.0, usage)) * 100  # Clamp to 0-100%
     
     def get_memory_usage(self, base_usage: float = 0.4,
@@ -113,7 +113,7 @@ class ResourceUsageSimulator:
         leak_factor = 0.1 * time_factor  # Slow leak over week
         
         usage = base_usage + leak_factor
-        usage += random.gauss(0, 0.03)  # Noise
+        usage += float(_RNG.normal(0, 0.03))  # Noise
         return max(0.0, min(1.0, usage)) * 100  # Clamp to 0-100%
     
     def get_resource_curve(self, resource_type: str, 
@@ -121,11 +121,11 @@ class ResourceUsageSimulator:
         """Get resource usage following a specific curve"""
         if resource_type == "cpu":
             # CPU: periodic with bursts
-            return 0.3 + 0.4 * math.sin(time_elapsed / 100) + 0.2 * random.random()
+            return 0.3 + 0.4 * math.sin(time_elapsed / 100) + 0.2 * float(_RNG.random())
         elif resource_type == "memory":
             # Memory: gradual increase with occasional GC drops
             base = 0.2 + 0.6 * (1 - math.exp(-time_elapsed / 1000))
-            gc_drop = 0.3 if random.random() < 0.01 else 0  # Occasional GC
+            gc_drop = 0.3 if float(_RNG.random()) < 0.01 else 0  # Occasional GC
             return max(0, base - gc_drop)
         elif resource_type == "disk":
             # Disk: steady growth
@@ -144,30 +144,30 @@ class NetworkSimulator:
         
     def simulate_partition(self) -> bool:
         """Return True if network partition is simulated"""
-        return random.random() < self.partition_probability
+        return float(_RNG.random()) < self.partition_probability
     
     def get_latency(self) -> float:
         """Get network latency in milliseconds"""
         # Base latency with occasional spikes
-        latency = self.latency_ms + random.gauss(0, self.latency_ms * 0.2)
-        if random.random() < 0.05:  # 5% chance of spike
-            latency *= random.uniform(2, 10)
+        latency = self.latency_ms + float(_RNG.normal(0, self.latency_ms * 0.2))
+        if float(_RNG.random()) < 0.05:  # 5% chance of spike
+            latency *= float(_RNG.uniform(2, 10))
         return max(1.0, latency)
     
     def get_bandwidth(self) -> float:
         """Get available bandwidth in Mbps"""
         # Bandwidth varies with usage and conditions
-        usage_factor = random.uniform(0.3, 0.9)
-        condition_factor = random.uniform(0.8, 1.2)
+        usage_factor = float(_RNG.uniform(0.3, 0.9))
+        condition_factor = float(_RNG.uniform(0.8, 1.2))
         return self.bandwidth_mbps * usage_factor * condition_factor
 
 
 def generate_failure_scenario(config: Dict[str, Any]) -> Dict[str, Any]:
     """Generate a random failure scenario based on config"""
     scenario = {
-        "type": random.choice(["crashloop", "oom", "node_failure", "cascade"]),
-        "severity": random.uniform(0.3, 0.9),
-        "duration": random.randint(30, 300),  # seconds
+        "type": str(_RNG.choice(["crashloop", "oom", "node_failure", "cascade"])),
+        "severity": float(_RNG.uniform(0.3, 0.9)),
+        "duration": int(_RNG.integers(30, 301)),  # seconds
         "affected_components": []
     }
     
@@ -186,5 +186,5 @@ def generate_failure_scenario(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def apply_realistic_noise(value: float, noise_percent: float = 10.0) -> float:
     """Apply realistic noise to a value"""
-    noise = random.gauss(0, value * (noise_percent / 100.0))
+    noise = float(_RNG.normal(0, value * (noise_percent / 100.0)))
     return max(0, value + noise)

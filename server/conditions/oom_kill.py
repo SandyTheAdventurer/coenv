@@ -4,7 +4,6 @@ OOMKillCondition - Simulates memory-limit failures causing repeated restarts
 
 from typing import Dict, List, Any, Optional
 from ..COEnv_environment import World
-import random
 
 
 class OOMKillCondition:
@@ -34,18 +33,18 @@ class OOMKillCondition:
             target_deps = [d for d in deployments if d.name == target_deployment]
         else:
             # Target a random deployment
-            target_deps = [random.choice(deployments)] if deployments else []
+            target_deps = [self.world.rng.choice(deployments)] if deployments else []
             
         for deployment in target_deps:
             # Get pods for this deployment
             pods = [p for p in self.world.get_pods() if p.deployment == deployment.name]
             
             for pod in pods:
-                if failure_rate is not None and random.random() < failure_rate:
+                if failure_rate is not None and float(self.world.rng.random()) < failure_rate:
                     # Simulate OOMKill by setting high memory usage and restart count
                     patch = {
                         "status": "Running",  # OOMKill pods often show as Running but crash
-                        "restarts": random.randint(10, 30)  # High restart count from OOM
+                        "restarts": int(self.world.rng.integers(10, 31))  # High restart count from OOM
                     }
                     self.world.apply_patch("pod", pod.name, patch)
                     
@@ -60,11 +59,11 @@ class OOMKillCondition:
     
     def _add_oom_event(self, pod_name: str):
         """Add an OOMKill event"""
-        from .models import ClusterEvent
+        from ..models import ClusterEvent
         from datetime import datetime
         
         event = ClusterEvent(
-            event_id=f"event-oom-{random.randint(1000, 9999)}",
+            event_id=f"event-oom-{int(self.world.rng.integers(1000, 10000))}",
             timestamp=datetime.now().isoformat(),
             type="Warning",
             reason="OOMKilling",
