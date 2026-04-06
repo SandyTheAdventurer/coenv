@@ -3,6 +3,7 @@ COEnv FastAPI Application
 Exposes /reset /step /state endpoints
 """
 
+from openenv.core.env_server import create_app
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, List, Literal
@@ -11,8 +12,13 @@ import json
 import os
 import sys
 
-from .COEnv_environment import World
-from .models import ClusterObservation, RewardSignal, KubeAction
+try:
+    from .COEnv_environment import World
+    from .models import ClusterObservation, RewardSignal, KubeAction
+except ImportError:
+    # Support running as a top-level module inside container images.
+    from COEnv_environment import World
+    from models import ClusterObservation, RewardSignal, KubeAction
 
 app = FastAPI(title="COEnv", description="Kubernetes Simulator for OpenEnv")
 
@@ -56,13 +62,22 @@ def load_config():
 def get_condition_for_task(task_id: str):
     """Get the condition injector for a task"""
     if task_id == "pod_recovery":
-        from .conditions.crash_loop import CrashLoopCondition
+        try:
+            from .conditions.crash_loop import CrashLoopCondition
+        except ImportError:
+            from conditions.crash_loop import CrashLoopCondition
         return CrashLoopCondition(world_instance, config)
     elif task_id == "autoscaling":
-        from .conditions.oom_kill import OOMKillCondition
+        try:
+            from .conditions.oom_kill import OOMKillCondition
+        except ImportError:
+            from conditions.oom_kill import OOMKillCondition
         return OOMKillCondition(world_instance, config)
     elif task_id == "incident":
-        from .conditions.cascade_failure import CascadeFailureCondition
+        try:
+            from .conditions.cascade_failure import CascadeFailureCondition
+        except ImportError:
+            from conditions.cascade_failure import CascadeFailureCondition
         return CascadeFailureCondition(world_instance, config)
     return None
 
@@ -82,7 +97,7 @@ async def startup_event():
     """Initialize the world on startup"""
     global world_instance, current_task, current_objective
     load_config()
-    world_instance = World(config)
+    world_instance = World(config, seed=config.get("seed"))
     print("COEnv initialized")
 
 
@@ -279,5 +294,16 @@ async def get_state():
     return world_instance.get_observation(current_objective).model_dump()
 
 
-if __name__ == "__main__":
+@app.get("/health")
+async def health():
+    """Container health endpoint used by Docker health checks."""
+    return {"status": "ok"}
+
+
+def main() -> None:
+    """Application entrypoint for local execution."""
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    main()

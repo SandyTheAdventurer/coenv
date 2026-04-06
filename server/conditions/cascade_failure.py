@@ -4,7 +4,6 @@ CascadeFailureCondition - Simulates multi-service dependency failure
 
 from typing import Dict, List, Any, Optional
 from ..COEnv_environment import World
-import random
 
 
 class CascadeFailureCondition:
@@ -32,14 +31,14 @@ class CascadeFailureCondition:
             deployments = self.world.get_deployments()
             critical_deployments = [d for d in deployments if d.name in critical_services]
             if critical_deployments:
-                root_cause_service = random.choice(critical_deployments).name
+                root_cause_service = self.world.rng.choice(critical_deployments).name
             else:
                 deployments = self.world.get_deployments()
-                root_cause_service = random.choice(deployments).name if deployments else "frontend"
+                root_cause_service = self.world.rng.choice(deployments).name if deployments else "frontend"
         
         root_deployment = next((d for d in self.world.get_deployments() if d.name == root_cause_service), None)
         if root_deployment:
-            from ..oom_kill import OOMKillCondition
+            from .oom_kill import OOMKillCondition
             oom_condition = OOMKillCondition(self.world, self.config)
             oom_condition.inject(target_deployment=root_cause_service, failure_rate=0.8)
             
@@ -47,15 +46,15 @@ class CascadeFailureCondition:
         
         deployments = self.world.get_deployments()
         for deployment in deployments:
-            if deployment.name != root_cause_service and failure_probability is not None and random.random() < failure_probability:
-                failure_type = random.choice(["crashloop", "oom", "slow"])
+            if deployment.name != root_cause_service and failure_probability is not None and float(self.world.rng.random()) < failure_probability:
+                failure_type = str(self.world.rng.choice(["crashloop", "oom", "slow"]))
                 
                 if failure_type == "crashloop":
-                    from ..crash_loop import CrashLoopCondition
+                    from .crash_loop import CrashLoopCondition
                     condition = CrashLoopCondition(self.world, self.config)
                     condition.inject(target_deployment=deployment.name, failure_rate=0.6)
                 elif failure_type == "oom":
-                    from ..oom_kill import OOMKillCondition
+                    from .oom_kill import OOMKillCondition
                     condition = OOMKillCondition(self.world, self.config)
                     condition.inject(target_deployment=deployment.name, failure_rate=0.6)
                 else:
@@ -75,7 +74,7 @@ class CascadeFailureCondition:
         from datetime import datetime
         
         event = ClusterEvent(
-            event_id=f"event-cascade-{random.randint(1000, 9999)}",
+            event_id=f"event-cascade-{int(self.world.rng.integers(1000, 10000))}",
             timestamp=datetime.now().isoformat(),
             type=event_type,
             reason="CascadeFailure",

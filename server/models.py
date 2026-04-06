@@ -88,7 +88,7 @@ All typed models are mandatory for OpenEnv spec compliance.
 Every endpoint uses these.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices
 from typing import List, Dict, Any, Optional, Literal
 from datetime import datetime
 
@@ -171,7 +171,10 @@ class ClusterObservation(BaseModel):
     deployments: List[DeploymentStatus]
     services: List[ServiceStatus]
     configmaps: List[ConfigMapStatus]
-    hpas: List[HPAStatus]
+    hpas: List[HPAStatus] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("hpa", "hpas")
+    )
     events: List[ClusterEvent]
     step: int
     objective: str
