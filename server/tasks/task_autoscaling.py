@@ -4,7 +4,7 @@ Configure HPA to handle traffic spike
 """
 
 from typing import Dict, Any
-from ..COEnv_environment import World
+from ..coenv_environment import World
 
 
 class AutoscalingTask:

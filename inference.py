@@ -1,5 +1,5 @@
 """
-COEnv Inference Script
+coenv Inference Script
 Used by validators to run episodes with LLMs
 """
 
@@ -16,8 +16,8 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run COEnv inference')
-    parser.add_argument('--api-base-url', type=str, default=API_BASE_URL, help='Base URL for the COEnv API')
+    parser = argparse.ArgumentParser(description='Run coenv inference')
+    parser.add_argument('--api-base-url', type=str, default=API_BASE_URL, help='Base URL for the coenv API')
     parser.add_argument('--model-name', type=str, default=MODEL_NAME, help='Name of the model to use')
     parser.add_argument('--hf-token', type=str, default=HF_TOKEN, help='Hugging Face token (if needed)')
     parser.add_argument('--task-id', type=str, default='pod_recovery', help='Task ID to run')

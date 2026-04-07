@@ -1,8 +1,8 @@
-"""COEnv - Kubernetes Cluster Simulator for OpenEnv"""
+"""coenv - Kubernetes Cluster Simulator for OpenEnv"""
 
 __version__ = "0.1.0"
 
-from .COEnv_environment import World
+from .coenv_environment import World
 from .models import (
     ClusterObservation,
     RewardSignal,

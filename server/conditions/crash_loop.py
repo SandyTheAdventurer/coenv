@@ -3,7 +3,7 @@ CrashLoopCondition - Simulates pods stuck in CrashLoopBackOff
 """
 
 from typing import Dict, List, Any, Optional
-from ..COEnv_environment import World
+from ..coenv_environment import World
 
 
 class CrashLoopCondition:

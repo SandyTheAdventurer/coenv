@@ -22,19 +22,19 @@ The environment exposes realistic cluster state (nodes, pods, deployments, servi
 The simplest way to use the Coenv environment is through the `CoenvEnv` class:
 
 ```python
-from COEnv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoenvEnv
 
 try:
     # Create environment from Docker image
-    COEnvenv = CoenvEnv.from_docker_image("COEnv-env:latest")
+    coenvenv = CoenvEnv.from_docker_image("coenv-env:latest")
 
     # Reset with a task
-    result = COEnvenv.reset(task="pod_recovery")
+    result = coenvenv.reset(task="pod_recovery")
     print(f"Objective: {result.observation.objective}")
     print(f"Pods observed: {len(result.observation.pods)}")
 
     # Example remediation action
-    result = COEnvenv.step(
+    result = coenvenv.step(
         CoenvAction(
             action_type="scale",
             deployment="frontend",
@@ -47,7 +47,7 @@ try:
 
 finally:
     # Always clean up
-    COEnvenv.close()
+    coenvenv.close()
 ```
 
 That's it! The `CoenvEnv.from_docker_image()` method handles:
@@ -62,7 +62,7 @@ Before using the environment, you need to build the Docker image:
 
 ```bash
 # From project root
-docker build -t COEnv-env:latest -f server/Dockerfile .
+docker build -t coenv-env:latest -f server/Dockerfile .
 ```
 
 ## Deploying to Hugging Face Spaces
@@ -157,26 +157,26 @@ Reward is task-dependent and based on service health progression:
 If you already have a Coenv environment server running, you can connect directly:
 
 ```python
-from COEnv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoenvEnv
 
 # Connect to existing server
-COEnvenv = CoenvEnv(base_url="<ENV_HTTP_URL_HERE>")
+coenvenv = CoenvEnv(base_url="<ENV_HTTP_URL_HERE>")
 
 # Use as normal
-result = COEnvenv.reset(task="incident")
-result = COEnvenv.step(
+result = coenvenv.reset(task="incident")
+result = coenvenv.step(
     CoenvAction(action_type="describe", resource_type="deployment", name="api-gateway")
 )
 ```
 
-Note: When connecting to an existing server, `COEnvenv.close()` will NOT stop the server.
+Note: When connecting to an existing server, `coenvenv.close()` will NOT stop the server.
 
 ### Using the Context Manager
 
 The client supports context manager usage for automatic connection management:
 
 ```python
-from COEnv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoenvEnv
 
 # Connect with context manager (auto-connects and closes)
 with CoenvEnv(base_url="http://localhost:8000") as env:
@@ -213,7 +213,7 @@ app = create_app(
 Then multiple clients can connect simultaneously:
 
 ```python
-from COEnv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoenvEnv
 from concurrent.futures import ThreadPoolExecutor
 
 def run_episode(client_id: int):
@@ -238,7 +238,7 @@ Test the environment logic directly without starting the HTTP server:
 
 ```bash
 # From the server directory
-python3 server/COEnv_environment.py
+python3 server/coenv_environment.py
 ```
 
 This verifies that:
@@ -258,7 +258,7 @@ uvicorn server.app:app --reload
 ## Project Structure
 
 ```
-COEnv/
+coenv/
 ├── .dockerignore         # Docker build exclusions
 ├── __init__.py            # Module exports
 ├── README.md              # This file
@@ -269,7 +269,7 @@ COEnv/
 ├── models.py              # Action and Observation models
 └── server/
     ├── __init__.py        # Server module exports
-    ├── COEnv_environment.py  # Core environment logic
+    ├── coenv_environment.py  # Core environment logic
     ├── app.py             # FastAPI application (HTTP + WebSocket endpoints)
     └── Dockerfile         # Container image definition
 ```

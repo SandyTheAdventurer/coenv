@@ -1,5 +1,5 @@
 """
-COEnv OpenEnv Application
+coenv OpenEnv Application
 Uses OpenEnv's create_app factory.
 """
 
@@ -18,7 +18,7 @@ except ImportError:
     from simulation_service import CoenvEnvironment
 
 
-app = create_app(CoenvEnvironment, CoenvAction, CoenvObservation, max_concurrent_envs=4)
+app = create_app(CoenvEnvironment, CoenvAction, CoenvObservation, env_name="coenv")
 
 
 @app.get("/health")

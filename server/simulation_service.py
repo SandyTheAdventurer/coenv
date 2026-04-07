@@ -1,4 +1,4 @@
-"""Simulation service layer for the COEnv OpenEnv adapter.
+"""Simulation service layer for the coenv OpenEnv adapter.
 
 This module contains task config loading, condition injection, action execution,
 and reward/completion logic so server app wiring stays thin.
@@ -9,11 +9,11 @@ from __future__ import annotations
 from typing import Dict, Any
 import json
 import os
-
+from openenv.core.env_server.interfaces import Environment
 try:
-    from .COEnv_environment import World
+    from .coenv_environment import World
 except ImportError:
-    from COEnv_environment import World
+    from coenv_environment import World
 
 try:
     from ..models import CoenvAction, CoenvObservation
@@ -142,7 +142,7 @@ def check_task_complete(world: World, task_id: str) -> bool:
     return False
 
 
-class CoenvEnvironment:
+class CoenvEnvironment(Environment):
     """OpenEnv environment adapter over the in-memory Kubernetes simulator."""
 
     def __init__(self):
@@ -250,3 +250,5 @@ class CoenvEnvironment:
             reward=reward,
             metadata=info,
         )
+    def close(self) -> None:
+        return

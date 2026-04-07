@@ -10,7 +10,7 @@ WORKDIR /app
 
 # Build arguments for OpenEnv build pipeline compatibility.
 ARG BUILD_MODE=in-repo
-ARG ENV_NAME=COEnv
+ARG ENV_NAME=coenv
 
 # Copy environment code from the build context root.
 COPY . /app/env

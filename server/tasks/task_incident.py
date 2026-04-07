@@ -4,7 +4,7 @@ Handle multi-service cascading incident
 """
 
 from typing import Dict, Any
-from ..COEnv_environment import World
+from ..coenv_environment import World
 from ..conditions.cascade_failure import CascadeFailureCondition
 
 

@@ -1,4 +1,4 @@
-"""COEnv Graders"""
+"""coenv Graders"""
 
 __all__ = ["grader_pod_recovery", "grader_autoscaling", "grader_incident"]
 
