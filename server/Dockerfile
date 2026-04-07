@@ -17,19 +17,33 @@ COPY . /app/env
 
 WORKDIR /app/env
 
-# Install dependencies with uv (locked when uv.lock is available).
+# Install dependencies with uv.
+# Use pyproject/uv.lock when present, otherwise fall back to requirements.txt
+# because submission validators often build from server/ as context.
 RUN --mount=type=cache,target=/root/.cache/uv \
-	if [ -f uv.lock ]; then \
-		uv sync --frozen --no-install-project --no-editable; \
+	if [ -f pyproject.toml ]; then \
+		if [ -f uv.lock ]; then \
+			uv sync --frozen --no-install-project --no-editable; \
+		else \
+			uv sync --no-install-project --no-editable; \
+		fi; \
+	elif [ -f requirements.txt ]; then \
+		uv venv .venv; \
+		uv pip install --python .venv/bin/python -r requirements.txt; \
 	else \
-		uv sync --no-install-project --no-editable; \
+		echo "No pyproject.toml or requirements.txt found in build context" >&2; \
+		exit 2; \
 	fi
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-	if [ -f uv.lock ]; then \
-		uv sync --frozen --no-editable; \
+	if [ -f pyproject.toml ]; then \
+		if [ -f uv.lock ]; then \
+			uv sync --frozen --no-editable; \
+		else \
+			uv sync --no-editable; \
+		fi; \
 	else \
-		uv sync --no-editable; \
+		true; \
 	fi
 
 FROM ${BASE_IMAGE}

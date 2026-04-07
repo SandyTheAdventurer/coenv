@@ -12,10 +12,10 @@ from openenv.core import EnvClient
 from openenv.core.client_types import StepResult
 from openenv.core.env_server.types import State
 
-from .models import CoenvAction, CoenvObservation
+from models import CoenvAction, CoenvObservation
 
 
-class CoenvEnv(
+class CoEnv(
     EnvClient[CoenvAction, CoenvObservation, State]
 ):
     """
@@ -27,7 +27,7 @@ class CoenvEnv(
 
     Example:
         >>> # Connect to a running server
-        >>> with CoenvEnv(base_url="http://localhost:8000") as client:
+        >>> with CoEnv(base_url="http://localhost:8000") as client:
         ...     result = client.reset()
         ...     print(result.observation.echoed_message)
         ...
@@ -36,7 +36,7 @@ class CoenvEnv(
 
     Example with Docker:
         >>> # Automatically start container and connect
-        >>> client = CoenvEnv.from_docker_image("coenv-env:latest")
+        >>> client = CoEnv.from_docker_image("coenv-env:latest")
         >>> try:
         ...     result = client.reset()
         ...     result = client.step(CoenvAction(message="Test"))

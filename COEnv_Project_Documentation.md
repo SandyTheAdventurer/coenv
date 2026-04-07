@@ -387,7 +387,7 @@ coenv/
 ├── openenv.yaml                   # OpenEnv manifest
 ├── pyproject.toml                 # Project metadata and dependencies
 ├── uv.lock                        # Locked dependencies
-├── client.py                      # CoenvEnv client / inference-side runner
+├── client.py                      # CoEnv client / inference-side runner
 ├── models.py                      # Shared action and observation models
 ├── config.json                    # Cluster defaults and simulation params
 ├── mkdocs.yml                     # Docs site configuration

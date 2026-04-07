@@ -19,14 +19,14 @@ The environment exposes realistic cluster state (nodes, pods, deployments, servi
 
 ## Quick Start
 
-The simplest way to use the Coenv environment is through the `CoenvEnv` class:
+The simplest way to use the Coenv environment is through the `CoEnv` class:
 
 ```python
-from coenv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoEnv
 
 try:
     # Create environment from Docker image
-    coenvenv = CoenvEnv.from_docker_image("coenv-env:latest")
+    coenvenv = CoEnv.from_docker_image("coenv-env:latest")
 
     # Reset with a task
     result = coenvenv.reset(task="pod_recovery")
@@ -50,7 +50,7 @@ finally:
     coenvenv.close()
 ```
 
-That's it! The `CoenvEnv.from_docker_image()` method handles:
+That's it! The `CoEnv.from_docker_image()` method handles:
 - Starting the Docker container
 - Waiting for the server to be ready
 - Connecting to the environment
@@ -157,10 +157,10 @@ Reward is task-dependent and based on service health progression:
 If you already have a Coenv environment server running, you can connect directly:
 
 ```python
-from coenv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoEnv
 
 # Connect to existing server
-coenvenv = CoenvEnv(base_url="<ENV_HTTP_URL_HERE>")
+coenvenv = CoEnv(base_url="<ENV_HTTP_URL_HERE>")
 
 # Use as normal
 result = coenvenv.reset(task="incident")
@@ -176,10 +176,10 @@ Note: When connecting to an existing server, `coenvenv.close()` will NOT stop th
 The client supports context manager usage for automatic connection management:
 
 ```python
-from coenv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoEnv
 
 # Connect with context manager (auto-connects and closes)
-with CoenvEnv(base_url="http://localhost:8000") as env:
+with CoEnv(base_url="http://localhost:8000") as env:
     result = env.reset(task="autoscaling")
     print(f"Reset objective: {result.observation.objective}")
     # Multiple steps with low latency
@@ -213,11 +213,11 @@ app = create_app(
 Then multiple clients can connect simultaneously:
 
 ```python
-from coenv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoEnv
 from concurrent.futures import ThreadPoolExecutor
 
 def run_episode(client_id: int):
-    with CoenvEnv(base_url="http://localhost:8000") as env:
+    with CoEnv(base_url="http://localhost:8000") as env:
         result = env.reset(task="pod_recovery")
         for i in range(10):
             result = env.step(
@@ -265,7 +265,7 @@ coenv/
 ├── openenv.yaml           # OpenEnv manifest
 ├── pyproject.toml         # Project metadata and dependencies
 ├── uv.lock                # Locked dependencies (generated)
-├── client.py              # CoenvEnv client
+├── client.py              # CoEnv client
 ├── models.py              # Action and Observation models
 └── server/
     ├── __init__.py        # Server module exports
