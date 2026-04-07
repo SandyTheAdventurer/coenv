@@ -11,7 +11,7 @@ These models define the public OpenEnv action/observation schema for the
 Kubernetes simulation.
 """
 
-from openenv.core.env_server.types import Action, Observation
+from openenv.core.env_server.types import Action, Observation, State
 from pydantic import Field
 from typing import Dict, Any, Optional, Literal, List
 
@@ -74,3 +74,9 @@ class CoenvObservation(Observation):
     events: List[ClusterEvent] = Field(default_factory=list)
     step: int = Field(default=0)
     objective: str = Field(default="")
+
+class CoenvState(State):
+    """State model for the Kubernetes simulator."""
+
+    episode_id: str = Field(default="")
+    step_count: int = Field(default=0)

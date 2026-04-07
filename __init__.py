@@ -6,11 +6,11 @@
 
 """Coenv Environment."""
 
-from .client import CoenvEnv
+from .client import CoEnv
 from .models import CoenvAction, CoenvObservation
 
 __all__ = [
     "CoenvAction",
     "CoenvObservation",
-    "CoenvEnv",
+    "CoEnv",
 ]

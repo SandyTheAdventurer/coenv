@@ -16,9 +16,9 @@ except ImportError:
     from coenv_environment import World
 
 try:
-    from ..models import CoenvAction, CoenvObservation
+    from ..models import CoenvAction, CoenvObservation, CoenvState
 except ImportError:
-    from models import CoenvAction, CoenvObservation
+    from models import CoenvAction, CoenvObservation, CoenvState
 
 
 def load_config() -> Dict[str, Any]:
@@ -147,6 +147,7 @@ class CoenvEnvironment(Environment):
 
     def __init__(self):
         self.config: Dict[str, Any] = load_config()
+        self.episode_id = f"episode-{os.getpid()}-{int(os.times()[4] * 1000)}"
         self.world = World(self.config, seed=self.config.get("seed"))
         self.current_task = "pod_recovery"
         self.current_objective = get_objective_for_task(self.current_task)
@@ -225,14 +226,16 @@ class CoenvEnvironment(Environment):
             done = True
 
         return self._observation(done=done, reward=reward, info=info)
-
-    def state(self, **_: Any) -> Dict[str, Any]:
-        """Return lightweight environment state metadata."""
-        return {
-            "step": self.world.step_count,
-            "task": self.current_task,
-            "objective": self.current_objective,
-        }
+    
+    @property
+    def state(self) -> CoenvState:
+        """Return current observation without applying an action."""
+        reward = calculate_reward(self.world, self.current_task)
+        done = check_task_complete(self.world, self.current_task)
+        return CoenvState(
+            episode_id=self.episode_id,
+            step_count=self.world.step_count
+        )
 
     def _observation(self, done: bool, reward: float, info: Dict[str, Any]) -> CoenvObservation:
         obs = self.world.get_observation(self.current_objective)
