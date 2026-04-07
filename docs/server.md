@@ -103,7 +103,7 @@ app = create_app(
     CoenvEnvironment,
     CoenvAction,
     CoenvObservation,
-    env_name="COEnv",
+    env_name="coenv",
     max_concurrent_envs=1
 )
 ```
