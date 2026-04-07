@@ -1,4 +1,4 @@
-"""COEnv Tasks"""
+"""coenv Tasks"""
 
 __all__ = ["task_pod_recovery", "task_autoscaling", "task_incident"]
 

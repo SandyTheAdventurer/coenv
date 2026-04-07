@@ -1,4 +1,4 @@
-# COEnv — Project Documentation
+# coenv — Project Documentation
 ### Meta × Hugging Face OpenEnv RL Hackathon
 
 ---
@@ -22,7 +22,7 @@
 
 ## 1. What Is This Project?
 
-**COEnv** is a Reinforcement Learning environment that simulates real-world Kubernetes cluster operations. An AI agent (LLM) is placed inside a broken or degraded Kubernetes cluster and must figure out the right sequence of operations to fix it — just like a real Site Reliability Engineer (SRE) would.
+**coenv** is a Reinforcement Learning environment that simulates real-world Kubernetes cluster operations. An AI agent (LLM) is placed inside a broken or degraded Kubernetes cluster and must figure out the right sequence of operations to fix it — just like a real Site Reliability Engineer (SRE) would.
 
 This is built for the **Meta × Hugging Face OpenEnv RL Hackathon**, which requires:
 - A real-world task simulation (not games or toys)
@@ -380,7 +380,7 @@ class Worker:
 ## 6. Full Project Directory Structure
 
 ```text
-COEnv/
+coenv/
 ├── .dockerignore                  # Docker build exclusions
 ├── __init__.py                    # Module exports
 ├── README.md                      # Project documentation
@@ -402,7 +402,7 @@ COEnv/
 │   └── test_integration.py        # End-to-end reset→step→state flow
 └── server/
     ├── __init__.py                # Server module exports
-    ├── COEnv_environment.py       # Core environment logic
+    ├── coenv_environment.py       # Core environment logic
     ├── app.py                     # FastAPI app exposing /reset /step /state
     ├── Dockerfile                 # Container image definition
     ├── utils.py                   # Simulation helpers
@@ -700,5 +700,5 @@ The PS explicitly states: *"The reward function must provide feedback throughout
 
 ---
 
-*COEnv — Meta × Hugging Face OpenEnv RL Hackathon*  
+*coenv — Meta × Hugging Face OpenEnv RL Hackathon*  
 *Team: Sandeep (RL environment) · You (Simulation) · Third Person (Actions & Workers)*

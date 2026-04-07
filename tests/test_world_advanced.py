@@ -1,6 +1,6 @@
 import pytest
 
-from server.COEnv_environment import World
+from server.coenv_environment import World
 from server.models import ClusterEvent
 
 

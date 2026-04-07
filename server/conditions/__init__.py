@@ -1,4 +1,4 @@
-"""COEnv Conditions - Failure injectors"""
+"""coenv Conditions - Failure injectors"""
 
 __all__ = ["crash_loop", "oom_kill", "node_failure", "cascade_failure"]
 

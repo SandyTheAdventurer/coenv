@@ -4,7 +4,7 @@ Fix crash-looping pods by identifying and patching bad configuration
 """
 
 from typing import Dict, Any
-from ..COEnv_environment import World
+from ..coenv_environment import World
 from ..conditions.crash_loop import CrashLoopCondition
 
 

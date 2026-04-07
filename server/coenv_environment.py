@@ -1,5 +1,5 @@
 """
-COEnv Environment - Cluster Simulator
+coenv Environment - Cluster Simulator
 In-memory dict that holds cluster state: nodes, pods, deployments, services.
 Has methods like get_pods(), apply_patch(), tick() to advance time.
 This is the brain of the whole project.

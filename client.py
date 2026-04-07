@@ -36,7 +36,7 @@ class CoenvEnv(
 
     Example with Docker:
         >>> # Automatically start container and connect
-        >>> client = CoenvEnv.from_docker_image("COEnv-env:latest")
+        >>> client = CoenvEnv.from_docker_image("coenv-env:latest")
         >>> try:
         ...     result = client.reset()
         ...     result = client.step(CoenvAction(message="Test"))
