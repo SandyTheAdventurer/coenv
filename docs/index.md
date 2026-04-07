@@ -1,17 +1,49 @@
-# Welcome to MkDocs
+# COEnv
 
-For full documentation visit [mkdocs.org](https://www.mkdocs.org).
+A Kubernetes cluster simulation environment for OpenEnv. Provides a testbed for building and evaluating LLM agents that manage Kubernetes clusters.
 
-## Commands
+## Features
 
-* `mkdocs new [dir-name]` - Create a new project.
-* `mkdocs serve` - Start the live-reloading docs server.
-* `mkdocs build` - Build the documentation site.
-* `mkdocs -h` - Print help message and exit.
+- **Simulated Kubernetes Cluster**: Full cluster simulation including pods, nodes, deployments, services, ConfigMaps, and HPA
+- **7 Action Types**: Scale, patch, delete pods, rollout restart, set HPA, drain nodes, describe resources
+- **HTTP + WebSocket API**: Built on openenv-core with FastAPI server
+- **Action Validation**: Validate actions before execution
+- **Grader Support**: Customizable reward functions
 
-## Project layout
+## Quick Example
 
-    mkdocs.yml    # The configuration file.
-    docs/
-        index.md  # The documentation homepage.
-        ...       # Other markdown pages, images and other files.
+```python
+from COEnv import CoenvAction, CoenvEnv
+
+# Connect to server
+with CoenvEnv(base_url="http://localhost:8000") as env:
+    result = env.reset()
+    
+    # Execute actions
+    result = env.step(CoenvAction(message="Hello"))
+    print(result.observation.echoed_message)
+```
+
+## Architecture
+
+```
+COEnv/
+├── docs/                    # Documentation
+├── server/                 # Server implementation
+│   ├── app.py            # FastAPI app
+│   ├── executor.py       # Action execution
+│   ├── validator.py     # Action validation
+│   └── actions/        # Action definitions
+├── models.py            # Action/Observation models
+├── client.py            # Python client
+└── openenv.yaml       # OpenEnv manifest
+```
+
+## Next Steps
+
+- [Getting Started](./getting-started.md) - Set up and run
+- [Actions](./actions.md) - Available actions
+- [Models](./models.md) - Data models
+- [Server](./server.md) - Server architecture
+- [Client](./client.md) - Python client
+- [Deployment](./deployment.md) - Deploy to HF Spaces
