@@ -65,13 +65,13 @@ After deployment:
 ### Build Image
 
 ```bash
-docker build -t COEnv-env:latest -f server/Dockerfile .
+docker build -t coenv-env:latest -f server/Dockerfile .
 ```
 
 ### Run Locally
 
 ```bash
-docker run -p 8000:8000 COEnv-env:latest
+docker run -p 8000:8000 coenv-env:latest
 ```
 
 ### Docker Compose

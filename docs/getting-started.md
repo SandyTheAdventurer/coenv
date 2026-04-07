@@ -11,8 +11,8 @@ This guide will help you set up and run the COEnv Kubernetes cluster simulation 
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/your-org/COEnv.git
-cd COEnv
+git clone https://github.com/SandyTheAdventurer/coenv
+cd coenv
 ```
 
 2. Install dependencies:
@@ -38,19 +38,19 @@ uv run uvicorn server.app:app --host 0.0.0.0 --port 8000 --workers 4
 Or use the direct entry point:
 ```bash
 uv run --project . server
-python -m COEnv.server.app
+python -m coenv.server.app
 ```
 
 ## Docker Deployment
 
 Build the Docker image:
 ```bash
-docker build -t COEnv-env:latest -f server/Dockerfile .
+docker build -t coenv-env:latest -f server/Dockerfile .
 ```
 
 Run the container:
 ```bash
-docker run -p 8000:8000 COEnv-env:latest
+docker run -p 8000:8000 coenv-env:latest
 ```
 
 ## Deploy to Hugging Face Spaces
@@ -65,5 +65,5 @@ See [Deployment](./deployment.md) for more options.
 
 Test the environment locally:
 ```bash
-python3 server/COEnv_environment.py
+python3 server/coenv_environment.py
 ```

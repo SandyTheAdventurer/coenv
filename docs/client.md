@@ -32,7 +32,7 @@ with CoenvEnv(base_url="http://localhost:8000") as env:
 from COEnv import CoenvAction, CoenvEnv
 
 # Automatically start container
-env = CoenvEnv.from_docker_image("COEnv-env:latest")
+env = CoenvEnv.from_docker_image("coenv-env:latest")
 try:
     result = env.reset()
     result = env.step(CoenvAction(message="Test"))
@@ -82,7 +82,7 @@ The client uses WebSocket for:
 Import from the package:
 
 ```python
-from COEnv import CoenvAction, CoenvObservation, CoenvEnv
+from coenv import CoenvAction, CoenvObservation, CoenvEnv
 
 action = CoenvAction(message="test")
 observation = CoenvObservation(echoed_message="test", message_length=4)
