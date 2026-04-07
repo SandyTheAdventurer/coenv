@@ -50,29 +50,25 @@ from typing import List, Optional
 from openai import OpenAI
 from models import CoenvAction
 from client import CoEnv
+from dotenv import load_dotenv
+load_dotenv()
 IMAGE_NAME = os.getenv("IMAGE_NAME")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-TASK_NAME = os.getenv("MY_ENV_V4_TASK", "echo")
-BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "my_env_v4")
+ENV_URL = os.getenv("ENV_URL") or "http://localhost:8000"
 MAX_STEPS = 8
 TEMPERATURE = 0.7
 MAX_TOKENS = 150
 SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 
-# Max possible reward: each token contributes 0.1, across all steps
 _MAX_REWARD_PER_STEP = MAX_TOKENS * 0.1
 MAX_TOTAL_REWARD = MAX_STEPS * _MAX_REWARD_PER_STEP
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
-    You are interacting with a simple echo environment.
-    Each turn you must send a message. The environment will echo it back.
-    Reward is proportional to message length: reward = len(message) * 0.1
-    Your goal is to maximize total reward by sending meaningful, substantive messages.
-    Reply with exactly one message string — no quotes, no prefixes, just the message text.
+    You are an agent interacting with an Kubernetes-like simulation environment.
     """
 ).strip()
 
