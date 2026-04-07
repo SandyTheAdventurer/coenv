@@ -20,6 +20,13 @@ try:
 except ImportError:
     from models import CoenvAction, CoenvObservation
 
+try:
+    from openenv.core.env_server.interfaces import Environment
+    from openenv.core.env_server.types import State
+except ImportError:
+    from openenv.core.env_server.interfaces import Environment
+    from openenv.core.env_server.types import State
+
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from config.json with sensible defaults."""
@@ -142,25 +149,40 @@ def check_task_complete(world: World, task_id: str) -> bool:
     return False
 
 
-class CoenvEnvironment:
+class CoenvEnvironment(Environment):
     """OpenEnv environment adapter over the in-memory Kubernetes simulator."""
 
+    SUPPORTS_CONCURRENT_SESSIONS: bool = True
+
     def __init__(self):
+        self._state = State(episode_id="default", step_count=0)
         self.config: Dict[str, Any] = load_config()
         self.world = World(self.config, seed=self.config.get("seed"))
         self.current_task = "pod_recovery"
         self.current_objective = get_objective_for_task(self.current_task)
 
-    def reset(self, task: str = "pod_recovery", **_: Any) -> CoenvObservation:
+    @property
+    def state(self) -> State:
+        return self._state
+
+    def close(self) -> None:
+        """Clean up resources."""
+        pass
+
+    def reset(self, task: str = "pod_recovery", seed: int = None, episode_id: str = None, **_: Any) -> CoenvObservation:
         """Reset simulator state for the selected task and return initial observation."""
+        if episode_id:
+            self._state.episode_id = episode_id
+        self._state.step_count = 0
         self.current_task = task
         self.current_objective = get_objective_for_task(task)
         condition = get_condition_for_task(task, self.world, self.config)
         self.world.reset(condition)
         return self._observation(done=False, reward=0.0, info={"task": task})
 
-    def step(self, action: CoenvAction, **_: Any) -> CoenvObservation:
+    def step(self, action: CoenvAction, timeout_s: float = None, **_: Any) -> CoenvObservation:
         """Apply one action, tick the world, and return updated observation with reward."""
+        self._state.step_count += 1
         info: Dict[str, Any] = {}
 
         try:
