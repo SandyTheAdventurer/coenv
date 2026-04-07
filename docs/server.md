@@ -1,11 +1,11 @@
 # Server
 
-The COEnv server provides a FastAPI application for the Kubernetes cluster simulation.
+The coenv server provides a FastAPI application for the Kubernetes cluster simulation.
 
 ## Architecture
 
 ```
-COEnv/
+coenv/
 ├── server/
 │   ├── app.py                    # FastAPI application entry point
 │   ├── COEnv_environment.py     # Environment implementation

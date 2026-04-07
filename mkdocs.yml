@@ -38,11 +38,6 @@ markdown_extensions:
 
 plugins:
   - search
-  - material-terminology:
-      term_mapping:
-        Kubernetes: Kubernetes
-        Docker: Docker
-
 extra:
   social:
     - icon: fontawesome/brands/github

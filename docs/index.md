@@ -1,4 +1,4 @@
-# COEnv
+# coenv
 
 A Kubernetes cluster simulation environment for OpenEnv. Provides a testbed for building and evaluating LLM agents that manage Kubernetes clusters.
 
