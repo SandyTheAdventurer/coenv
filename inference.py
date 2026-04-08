@@ -71,9 +71,9 @@ from server.graders.grader_incident import grade as grade_incident
 if load_dotenv is not None:
     load_dotenv()
 
-ENV_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+ENV_URL = os.getenv("API_BASE_URL", "https://Nightreigners-COEnv.hf.space")
 
-LLM_BASE_URL = os.getenv("OPENROUTER_API_BASE_URL") or os.getenv("LLM_BASE_URL")
+LLM_BASE_URL =  os.getenv("LLM_BASE_URL")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen3-8B")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
