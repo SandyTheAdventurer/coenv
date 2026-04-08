@@ -13,7 +13,7 @@ A Kubernetes cluster simulation environment for OpenEnv. Provides a testbed for 
 ## Quick Example
 
 ```python
-from COEnv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoenvEnv
 
 # Connect to server
 with CoenvEnv(base_url="http://localhost:8000") as env:
