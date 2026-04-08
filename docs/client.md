@@ -1,6 +1,6 @@
 # Client
 
-The coenv client provides a Python interface to connect to the COEnv server.
+The coenv client provides a Python interface to connect to the COEnv server via WebSocket.
 
 ## Installation
 
@@ -15,60 +15,116 @@ uv sync
 ### Connect to Running Server
 
 ```python
-from coenv import CoenvAction, CoenvEnv
+import asyncio
+from models import CoenvAction
+from client import CoEnv
 
-# Connect to existing server
-with CoenvEnv(base_url="http://localhost:8000") as env:
-    result = env.reset()
-    print(result.observation.echoed_message)
-    
-    result = env.step(CoenvAction(message="Hello!"))
-    print(result.observation.echoed_message)
+async def main():
+    async with CoEnv(base_url="http://localhost:8000") as client:
+        # Reset with a specific task
+        result = await client.reset(task="pod_recovery")
+        print(f"Objective: {result.observation.objective}")
+        print(f"Step: {result.observation.step}")
+        
+        # Execute an action
+        action = CoenvAction(
+            action_type="rollout_restart",
+            deployment="frontend"
+        )
+        result = await client.step(action)
+        
+        # Check metadata for action details
+        print(result.observation.metadata)
+
+asyncio.run(main())
 ```
 
-### Connect via Docker
+### Using Context Manager
+
+The client automatically handles connection lifecycle:
 
 ```python
-from coenv import CoenvAction, CoenvEnv
-
-# Automatically start container
-env = CoenvEnv.from_docker_image("coenv-env:latest")
-try:
-    result = env.reset()
-    result = env.step(CoenvAction(message="Test"))
-finally:
-    env.close()
+async with CoEnv(base_url="http://localhost:8000") as client:
+    result = await client.reset(task="autoscaling")
+    # ... use client ...
+# Connection automatically closed
 ```
 
-## CoenvEnv Class
+## Available Tasks
+
+| Task | Description |
+|------|-------------|
+| `pod_recovery` | Fix crash-looping frontend pods |
+| `autoscaling` | Configure HPA for traffic spike |
+| `incident` | Restore cascading failure |
+
+## CoEnv Class
 
 ```python
-class CoenvEnv(EnvClient[CoenvAction, CoenvObservation, State]):
+class CoEnv(EnvClient[CoenvAction, CoenvObservation, State]):
 ```
 
 ### Methods
 
-#### `reset() -> StepResult[CoenvObservation]`
+#### `reset(task: str = "pod_recovery") -> StepResult[CoenvObservation]`
 
 Reset the environment and return initial observation.
 
-#### `step(action: CoenvAction) -> StepResult[CoenvObservation]`
-
-Execute an action and return result.
-
-#### `get_state() -> State`
-
-Get current environment state.
-
-### Context Manager
-
 ```python
-with CoenvEnv(base_url="http://localhost:8000") as env:
-    result = env.reset()
-    result = env.step(CoenvAction(message="Hello"))
+result = await client.reset(task="pod_recovery")
 ```
 
-Automatically connects on enter and closes on exit.
+#### `step(action: CoenvAction) -> StepResult[CoenvObservation]`
+
+Execute an action and return the result.
+
+```python
+action = CoenvAction(
+    action_type="scale",
+    deployment="frontend",
+    replicas=5
+)
+result = await client.step(action)
+```
+
+#### `state -> CoenvState`
+
+Get current environment state (episode_id, step_count).
+
+```python
+state = client.state
+print(f"Episode: {state.episode_id}, Step: {state.step_count}")
+```
+
+### StepResult Fields
+
+The `StepResult` contains:
+
+- `observation` (`CoenvObservation`): Current cluster state
+- `reward` (`float`): Computed reward for the action
+- `done` (`bool`): Whether the task is complete
+
+### Observation Metadata
+
+The observation includes metadata with action results:
+
+```python
+result = await client.step(action)
+metadata = result.observation.metadata
+
+# Possible metadata keys:
+# - scaled: deployment name if scale action
+# - replicas: new replica count
+# - deleted: pod name if delete_pod action
+# - patched: resource if patch action
+# - restarted: deployment name if rollout_restart
+# - drained: node name if drain_node
+# - hpa_set: deployment name if set_hpa
+# - described: resource if describe action
+# - describe_detail: detailed info from describe
+# - error: error message if action failed
+# - truncated: True if max steps reached
+```
 
 ## WebSocket Connections
 
@@ -77,13 +133,42 @@ The client uses WebSocket for:
 - Persistent sessions (environment state maintained)
 - Efficient for multi-step episodes
 
-## Model Exports
-
-Import from the package:
+## Complete Example
 
 ```python
-from coenv import CoenvAction, CoenvObservation, CoenvEnv
+import asyncio
+from models import CoenvAction
+from client import CoEnv
 
-action = CoenvAction(message="test")
-observation = CoenvObservation(echoed_message="test", message_length=4)
+async def run_episode():
+    async with CoEnv(base_url="http://localhost:8000") as client:
+        # Reset for pod_recovery task
+        result = await client.reset(task="pod_recovery")
+        
+        for step in range(1, 16):
+            if result.done:
+                break
+            
+            # Example: try rollout restart
+            action = CoenvAction(
+                action_type="rollout_restart",
+                deployment="frontend"
+            )
+            
+            result = await client.step(action)
+            print(f"Step {step}: reward={result.reward:.2f}, done={result.done}")
+            
+            if result.observation.metadata.get("error"):
+                print(f"Error: {result.observation.metadata['error']}")
+
+asyncio.run(run_episode())
+```
+
+## Model Exports
+
+Import models from the package root:
+
+```python
+from models import CoenvAction, CoenvObservation
+from client import CoEnv
 ```

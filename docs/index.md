@@ -4,40 +4,58 @@ A Kubernetes cluster simulation environment for OpenEnv. Provides a testbed for 
 
 ## Features
 
-- **Simulated Kubernetes Cluster**: Full cluster simulation including pods, nodes, deployments, services, ConfigMaps, and HPA
-- **7 Action Types**: Scale, patch, delete pods, rollout restart, set HPA, drain nodes, describe resources
-- **HTTP + WebSocket API**: Built on openenv-core with FastAPI server
+- **Simulated Kubernetes Cluster**: Full cluster simulation including nodes, pods, deployments, services, ConfigMaps, and HPAs
+- **8 Action Types**: scale, patch, delete_pod, rollout_restart, set_hpa, drain_node, describe, wait
+- **3 Benchmark Tasks**: pod_recovery, autoscaling, incident
 - **Action Validation**: Validate actions before execution
-- **Grader Support**: Customizable reward functions
+- **Configurable Grading**: Customizable reward functions per task
 
 ## Quick Example
 
 ```python
-from coenv import CoenvAction, CoenvEnv
+from models import CoenvAction
+from client import CoEnv
 
 # Connect to server
-with CoenvEnv(base_url="http://localhost:8000") as env:
-    result = env.reset()
+with CoEnv(base_url="http://localhost:8000") as client:
+    result = client.reset(task="pod_recovery")
     
     # Execute actions
-    result = env.step(CoenvAction(message="Hello"))
-    print(result.observation.echoed_message)
+    action = CoenvAction(
+        action_type="rollout_restart",
+        deployment="frontend"
+    )
+    result = client.step(action)
+    print(result.observation.objective)
 ```
 
 ## Architecture
 
 ```
-COEnv/
+coenv/
 ├── docs/                    # Documentation
-├── server/                 # Server implementation
-│   ├── app.py            # FastAPI app
-│   ├── executor.py       # Action execution
-│   ├── validator.py     # Action validation
-│   └── actions/        # Action definitions
-├── models.py            # Action/Observation models
-├── client.py            # Python client
-└── openenv.yaml       # OpenEnv manifest
+├── server/                  # Server implementation
+│   ├── app.py               # FastAPI app entry point
+│   ├── simulation_service.py # Environment logic
+│   ├── coenv_environment.py # Cluster simulator (World class)
+│   ├── executor.py          # Action execution
+│   ├── validator.py         # Action validation
+│   ├── models.py           # Server-side data models
+│   ├── actions/            # Action definitions
+│   ├── conditions/         # Failure condition injectors
+│   └── graders/            # Task grading functions
+├── models.py                # Public action/observation models
+├── client.py                # Python client
+└── inference.py             # Example inference script
 ```
+
+## Benchmark Tasks
+
+| Task | Description | Objective |
+|------|-------------|-----------|
+| `pod_recovery` | Frontend deployment crash-looping | Fix root cause, restore all pods to Running |
+| `autoscaling` | Traffic spike to backend | Configure HPA, ensure latency < 500ms |
+| `incident` | Cascading failure across services | Identify root cause, restore all services |
 
 ## Next Steps
 

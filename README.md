@@ -9,267 +9,173 @@ app_port: 8000
 base_path: /web
 tags:
   - openenv
+  - kubernetes
+  - simulation
 ---
 
 # Coenv Environment
 
-A Kubernetes incident-response simulation environment for OpenEnv.
+A Kubernetes incident-response simulation environment for OpenEnv. Provides a testbed for building and evaluating LLM agents that manage Kubernetes clusters through realistic scenarios.
 
-The environment exposes realistic cluster state (nodes, pods, deployments, services, events) and supports operational actions such as scaling, restarting rollouts, patching resources, setting HPA, and draining nodes.
+## Features
+
+- **Simulated Kubernetes Cluster**: Full cluster simulation including nodes, pods, deployments, services, ConfigMaps, and HPAs
+- **8 Action Types**: scale, patch, delete_pod, rollout_restart, set_hpa, drain_node, describe, wait
+- **3 Benchmark Tasks**: pod_recovery, autoscaling, incident
+- **Action Validation**: Validate actions before execution
+- **Configurable Grading**: Customizable reward functions per task
 
 ## Quick Start
 
-The simplest way to use the Coenv environment is through the `CoEnv` class:
-
 ```python
-from coenv import CoenvAction, CoEnv
+import asyncio
+from models import CoenvAction
+from client import CoEnv
 
-try:
-    # Create environment from Docker image
-    coenvenv = CoEnv.from_docker_image("coenv-env:latest")
+async def main():
+    async with CoEnv(base_url="http://localhost:8000") as client:
+        # Reset with a task
+        result = await client.reset(task="pod_recovery")
+        print(f"Objective: {result.observation.objective}")
+        print(f"Pods observed: {len(result.observation.pods)}")
 
-    # Reset with a task
-    result = coenvenv.reset(task="pod_recovery")
-    print(f"Objective: {result.observation.objective}")
-    print(f"Pods observed: {len(result.observation.pods)}")
-
-    # Example remediation action
-    result = coenvenv.step(
-        CoenvAction(
-            action_type="scale",
-            deployment="frontend",
-            replicas=3,
+        # Example action
+        result = await client.step(
+            CoenvAction(
+                action_type="rollout_restart",
+                deployment="frontend",
+            )
         )
-    )
-    print(f"Step: {result.observation.step}")
-    print(f"Reward: {result.reward}")
-    print(f"Done: {result.done}")
+        print(f"Step: {result.observation.step}")
+        print(f"Reward: {result.reward}")
+        print(f"Done: {result.done}")
 
-finally:
-    # Always clean up
-    coenvenv.close()
+asyncio.run(main())
 ```
 
-That's it! The `CoEnv.from_docker_image()` method handles:
-- Starting the Docker container
-- Waiting for the server to be ready
-- Connecting to the environment
-- Container cleanup when you call `close()`
+## Benchmark Tasks
+
+| Task | Description | Objective |
+|------|-------------|-----------|
+| `pod_recovery` | Frontend deployment crash-looping | Fix root cause, restore all pods to Running |
+| `autoscaling` | Traffic spike to backend | Configure HPA, ensure p95 latency < 500ms |
+| `incident` | Cascading failure across services | Identify root cause, restore all services |
 
 ## Building the Docker Image
 
-Before using the environment, you need to build the Docker image:
-
 ```bash
-# From project root
 docker build -t coenv-env:latest -f server/Dockerfile .
 ```
 
 ## Deploying to Hugging Face Spaces
 
-You can easily deploy your OpenEnv environment to Hugging Face Spaces using the `openenv push` command:
-
 ```bash
-# From the environment directory (where openenv.yaml is located)
 openenv push
-
-# Or specify options
-openenv push --namespace my-org --private
 ```
 
 The `openenv push` command will:
-1. Validate that the directory is an OpenEnv environment (checks for `openenv.yaml`)
-2. Prepare a custom build for Hugging Face Docker space (enables web interface)
-3. Upload to Hugging Face (ensuring you're logged in)
+1. Validate that the directory is an OpenEnv environment
+2. Build Docker image
+3. Upload to Hugging Face Spaces
 
-### Prerequisites
+Options:
+- `--repo-id`: Repository ID (format: `org/name`)
+- `--private`: Deploy as private space
 
-- Authenticate with Hugging Face: The command will prompt for login if not already authenticated
+## Actions
 
-### Options
-
-- `--directory`, `-d`: Directory containing the OpenEnv environment (defaults to current directory)
-- `--repo-id`, `-r`: Repository ID in format 'username/repo-name' (defaults to 'username/env-name' from openenv.yaml)
-- `--base-image`, `-b`: Base Docker image to use (overrides Dockerfile FROM)
-- `--private`: Deploy the space as private (default: public)
-
-### Examples
-
-```bash
-# Push to your personal namespace (defaults to username/env-name from openenv.yaml)
-openenv push
-
-# Push to a specific repository
-openenv push --repo-id my-org/my-env
-
-# Push with a custom base image
-openenv push --base-image ghcr.io/meta-pytorch/openenv-base:latest
-
-# Push as a private space
-openenv push --private
-
-# Combine options
-openenv push --repo-id my-org/my-env --base-image custom-base:latest --private
-```
-
-After deployment, your space will be available at:
-`https://huggingface.co/spaces/<repo-id>`
-
-The deployed space includes:
-- **Web Interface** at `/web` - Interactive UI for exploring the environment
-- **API Documentation** at `/docs` - Full OpenAPI/Swagger interface
-- **Health Check** at `/health` - Container health monitoring
-- **WebSocket** at `/ws` - Persistent session endpoint for low-latency interactions
-
-## Environment Details
-
-### Action
 **CoenvAction** supports the following `action_type` values:
-- `scale`
-- `delete_pod`
-- `patch`
-- `rollout_restart`
-- `set_hpa`
-- `drain_node`
-- `describe`
 
-Action-specific fields include `deployment`, `replicas`, `pod_name`, `resource_type`, `name`, `patch`, `min_replicas`, `max_replicas`, `cpu_target_percent`, and `node_name`.
+| Action | Description | Tick Advances |
+|--------|-------------|---------------|
+| `scale` | Scale deployment replica count | Yes |
+| `patch` | Patch deployment, configmap, service, hpa, pod, node | Yes |
+| `delete_pod` | Delete a specific pod | Yes |
+| `rollout_restart` | Restart all pods in a deployment | Yes |
+| `set_hpa` | Configure Horizontal Pod Autoscaler | Yes |
+| `drain_node` | Cordon and drain a node | Yes |
+| `describe` | Get detailed info about a resource | No |
+| `wait` | Wait one simulation tick | Yes |
 
-### Observation
-**CoenvObservation** contains a typed cluster snapshot and episode metadata:
+## Observation
+
+**CoenvObservation** contains:
+
 - `nodes`, `pods`, `deployments`, `services`, `configmaps`, `hpas`, `events`
-- `step` (int)
-- `objective` (str)
-- `reward` (float)
-- `done` (bool)
-- `metadata` (dict)
+- `step` (int): Current simulation step
+- `objective` (str): Current task objective
 
-### Reward
-Reward is task-dependent and based on service health progression:
-- `pod_recovery`: fraction of frontend pods in Running state
-- `autoscaling`: backend availability progress
-- `incident`: proportion of key services restored to healthy
+With `StepResult` containing:
+- `reward` (float): Computed reward for the action
+- `done` (bool): Whether the task is complete
+
+## Reward
+
+Reward is task-dependent:
+- `pod_recovery`: Fraction of frontend pods in Running state
+- `autoscaling`: Backend availability (running ratio, stability, HPA config)
+- `incident`: Proportion of key services (auth-service, api-gateway, frontend) restored
 
 ## Advanced Usage
 
-### Connecting to an Existing Server
-
-If you already have a Coenv environment server running, you can connect directly:
+### Connect to Existing Server
 
 ```python
-from coenv import CoenvAction, CoEnv
+from models import CoenvAction
+from client import CoEnv
 
-# Connect to existing server
-coenvenv = CoEnv(base_url="<ENV_HTTP_URL_HERE>")
-
-# Use as normal
-result = coenvenv.reset(task="incident")
-result = coenvenv.step(
-    CoenvAction(action_type="describe", resource_type="deployment", name="api-gateway")
-)
+async with CoEnv(base_url="http://localhost:8000") as client:
+    result = await client.reset(task="incident")
+    result = await client.step(
+        CoenvAction(action_type="describe", resource_type="deployment", name="api-gateway")
+    )
 ```
 
-Note: When connecting to an existing server, `coenvenv.close()` will NOT stop the server.
+### WebSocket Connections
 
-### Using the Context Manager
+The client uses WebSocket for:
+- Lower latency (no HTTP overhead per request)
+- Persistent sessions (environment state maintained)
+- Efficient for multi-step episodes
 
-The client supports context manager usage for automatic connection management:
-
-```python
-from coenv import CoenvAction, CoEnv
-
-# Connect with context manager (auto-connects and closes)
-with CoEnv(base_url="http://localhost:8000") as env:
-    result = env.reset(task="autoscaling")
-    print(f"Reset objective: {result.observation.objective}")
-    # Multiple steps with low latency
-    for replicas in [3, 4, 5]:
-        result = env.step(
-            CoenvAction(action_type="scale", deployment="backend", replicas=replicas)
-        )
-        print(f"Replicas set to {replicas}, reward={result.reward}")
-```
-
-The client uses WebSocket connections for:
-- **Lower latency**: No HTTP connection overhead per request
-- **Persistent session**: Server maintains your environment state
-- **Efficient for episodes**: Better for many sequential steps
-
-### Concurrent WebSocket Sessions
-
-The server supports multiple concurrent WebSocket connections. To enable this,
-modify `server/app.py` to use factory mode:
-
-```python
-# In server/app.py - use factory mode for concurrent sessions
-app = create_app(
-    CoenvEnvironment,  # Pass class, not instance
-    CoenvAction,
-    CoenvObservation,
-    max_concurrent_envs=4,  # Allow 4 concurrent sessions
-)
-```
-
-Then multiple clients can connect simultaneously:
-
-```python
-from coenv import CoenvAction, CoEnv
-from concurrent.futures import ThreadPoolExecutor
-
-def run_episode(client_id: int):
-    with CoEnv(base_url="http://localhost:8000") as env:
-        result = env.reset(task="pod_recovery")
-        for i in range(10):
-            result = env.step(
-                CoenvAction(action_type="describe", resource_type="deployment", name="frontend")
-            )
-        return client_id, result.observation.step
-
-# Run 4 episodes concurrently
-with ThreadPoolExecutor(max_workers=4) as executor:
-    results = list(executor.map(run_episode, range(4)))
-```
-
-## Development & Testing
-
-### Direct Environment Testing
-
-Test the environment logic directly without starting the HTTP server:
+## Running Locally
 
 ```bash
-# From the server directory
-python3 server/coenv_environment.py
-```
+# Install dependencies
+uv sync
 
-This verifies that:
-- Environment resets correctly
-- Step executes actions properly
-- State tracking works
-- Rewards are calculated correctly
+# Start server
+uv run uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
 
-### Running Locally
-
-Run the server locally for development:
-
-```bash
-uvicorn server.app:app --reload
+# Or run inference
+uv run python inference.py
 ```
 
 ## Project Structure
 
 ```
 coenv/
-├── .dockerignore         # Docker build exclusions
-├── __init__.py            # Module exports
-├── README.md              # This file
-├── openenv.yaml           # OpenEnv manifest
-├── pyproject.toml         # Project metadata and dependencies
-├── uv.lock                # Locked dependencies (generated)
-├── client.py              # CoEnv client
-├── models.py              # Action and Observation models
-└── server/
-    ├── __init__.py        # Server module exports
-    ├── coenv_environment.py  # Core environment logic
-    ├── app.py             # FastAPI application (HTTP + WebSocket endpoints)
-    └── Dockerfile         # Container image definition
+├── docs/                    # Documentation
+├── server/                  # Server implementation
+│   ├── app.py               # FastAPI app entry point
+│   ├── simulation_service.py # Environment logic
+│   ├── coenv_environment.py # Cluster simulator (World class)
+│   ├── executor.py          # Action execution
+│   ├── validator.py         # Action validation
+│   ├── models.py           # Server-side data models
+│   ├── actions/            # Action definitions
+│   ├── conditions/         # Failure condition injectors
+│   └── graders/            # Task grading functions
+├── models.py                # Public action/observation models
+├── client.py                # Python client
+└── inference.py             # Example inference script
 ```
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `API_BASE_URL` | Server URL | `http://localhost:8000` |
+| `LLM_BASE_URL` | LLM API endpoint | `https://router.huggingface.co/v1` |
+| `MODEL_NAME` | Model identifier | `Qwen/Qwen3-8B` |
+| `HF_TOKEN` / `OPENROUTER_API_KEY` | API key | Required |
