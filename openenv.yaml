@@ -1,6 +1,10 @@
 name: coenv
 version: 0.1.0
 description: Kubernetes Cluster Simulator for OpenEnv RL Hackathon
+tags:
+  - openenv
+  - kubernetes
+  - simulation
 entrypoint: server.app:app
 inference: inference.py
 endpoints:
