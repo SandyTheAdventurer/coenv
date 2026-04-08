@@ -1,6 +1,6 @@
 # Client
 
-The COEnv client provides a Python interface to connect to the COEnv server.
+The coenv client provides a Python interface to connect to the COEnv server.
 
 ## Installation
 
@@ -15,7 +15,7 @@ uv sync
 ### Connect to Running Server
 
 ```python
-from COEnv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoenvEnv
 
 # Connect to existing server
 with CoenvEnv(base_url="http://localhost:8000") as env:
@@ -29,7 +29,7 @@ with CoenvEnv(base_url="http://localhost:8000") as env:
 ### Connect via Docker
 
 ```python
-from COEnv import CoenvAction, CoenvEnv
+from coenv import CoenvAction, CoenvEnv
 
 # Automatically start container
 env = CoenvEnv.from_docker_image("coenv-env:latest")
