@@ -99,7 +99,24 @@ def calculate_reward(world: World, task_id: str) -> float:
         backend_pods = [p for p in pods if p.deployment == "backend"]
         running = [p for p in backend_pods if p.status == "Running"]
         if backend_pods:
-            return min(len(running) / len(backend_pods), 1.0)
+            running_ratio = min(len(running) / len(backend_pods), 1.0)
+            unstable = [
+                p for p in backend_pods
+                if p.status != "Running" or getattr(p, "restarts", 0) >= 5
+            ]
+            stability_ratio = 1.0 - (len(unstable) / len(backend_pods))
+
+            hpas = world.get_hpas() if hasattr(world, "get_hpas") else []
+            backend_hpa = next((h for h in hpas if h.name == "backend-hpa"), None)
+            hpa_ok = (
+                backend_hpa is not None
+                and backend_hpa.min_replicas >= 2
+                and backend_hpa.max_replicas >= 6
+                and backend_hpa.cpu_target_percent <= 70
+            )
+
+            reward = (0.5 * running_ratio) + (0.3 * stability_ratio) + (0.2 * (1.0 if hpa_ok else 0.0))
+            return min(max(reward, 0.0), 1.0)
 
     elif task_id == "incident":
         pods = world.get_pods()

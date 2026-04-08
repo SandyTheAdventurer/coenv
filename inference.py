@@ -42,11 +42,10 @@ STDOUT FORMAT
     [END] success=true steps=3 score=1.00 rewards=0.00,0.00,1.00
 """
 
-import inspect
+import asyncio
 import json
 import os
 import textwrap
-import time
 from typing import Any, Callable, Dict, List, Optional
 
 from openai import OpenAI
@@ -309,26 +308,13 @@ def get_model_action(client: OpenAI, task_name: str, step: int, observation: Any
         print(f"[DEBUG] Model request failed: {exc}", flush=True)
         return _heuristic_action(task_name, observation)
 
-def _close_env(env: Any) -> None:
-    maybe = env.close()
-    if inspect.isawaitable(maybe):
-        # CoEnv.sync() should provide sync close(), but support awaitables defensively.
-        try:
-            while True:
-                maybe.send(None)
-        except StopIteration:
-            pass
-
-
-def main() -> None:
+async def main() -> None:
     if not API_KEY:
         raise RuntimeError("Missing HF_TOKEN/API_KEY for OpenAI client.")
     for TASK_NAME, BENCHMARK in zip(TASK_NAMES, BENCHMARKS):
         client = OpenAI(base_url=LLM_BASE_URL, api_key=API_KEY)
         max_steps = MAX_STEPS_BY_TASK.get(TASK_NAME, DEFAULT_MAX_STEPS)
         grader = GRADERS.get(TASK_NAME, grade_pod_recovery)
-
-        env = CoEnv(base_url=ENV_URL).sync()
 
         history: List[str] = []
         rewards: List[float] = []
@@ -345,36 +331,38 @@ def main() -> None:
         log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
         try:
-            result = env.reset(task=TASK_NAME)
-            final_obs = result.observation
+            async with CoEnv.from_env("SandyTheAdventurer/coenv") as env:
+                result = await env.reset(task=TASK_NAME)
+                final_obs = result.observation
 
-            for step in range(1, max_steps + 1):
-                time.sleep(API_DELAY)
-                if result.done:
-                    break
+                for step in range(1, max_steps + 1):
+                    if API_DELAY > 0:
+                        await asyncio.sleep(API_DELAY)
+                    if result.done:
+                        break
 
-                action_payload = get_model_action(client, TASK_NAME, step, final_obs, history)
-                action = CoenvAction(**action_payload)
+                    action_payload = get_model_action(client, TASK_NAME, step, final_obs, history)
+                    action = CoenvAction(**action_payload)
 
-                result = env.step(action)
-                obs = result.observation
-                final_obs = obs
+                    result = await env.step(action)
+                    obs = result.observation
+                    final_obs = obs
 
-                reward = result.reward or 0.0
-                done = result.done
-                error = (obs.metadata or {}).get("error") if hasattr(obs, "metadata") else None
+                    reward = result.reward or 0.0
+                    done = result.done
+                    error = (obs.metadata or {}).get("error") if hasattr(obs, "metadata") else None
 
-                rewards.append(reward)
-                steps_taken = step
-                episode_done = bool(done)
+                    rewards.append(reward)
+                    steps_taken = step
+                    episode_done = bool(done)
 
-                action_str = json.dumps(action_payload, separators=(",", ":"))
-                log_step(step=step, action=action_str, reward=reward, done=done, error=error)
+                    action_str = json.dumps(action_payload, separators=(",", ":"))
+                    log_step(step=step, action=action_str, reward=reward, done=done, error=error)
 
-                history.append(f"Step {step}: {action_str} -> reward {reward:+.2f}")
+                    history.append(f"Step {step}: {action_str} -> reward {reward:+.2f}")
 
-                if done:
-                    break
+                    if done:
+                        break
 
             world_state = _to_dict(final_obs) if final_obs is not None else {}
             score = grader(world_state, steps_taken, max_steps)
@@ -386,12 +374,8 @@ def main() -> None:
             )
 
         finally:
-            try:
-                _close_env(env)
-            except Exception as e:
-                print(f"[DEBUG] env.close() error (container cleanup): {e}", flush=True)
             log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
