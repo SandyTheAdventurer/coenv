@@ -45,6 +45,8 @@ STDOUT FORMAT
 import asyncio
 import json
 import os
+import websockets
+import sys
 import textwrap
 from typing import Any, Callable, Dict, List, Optional
 
@@ -69,15 +71,13 @@ from server.graders.grader_incident import grade as grade_incident
 if load_dotenv is not None:
     load_dotenv()
 
-LLM_BASE_URL = os.getenv("OPENROUTER_API_BASE_URL") or os.getenv(
-    "LLM_BASE_URL", "https://router.huggingface.co/v1"
-)
 ENV_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-API_DELAY = float(os.getenv("API_DELAY", "0"))
 
+LLM_BASE_URL = os.getenv("OPENROUTER_API_BASE_URL") or os.getenv("LLM_BASE_URL")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen3-8B")
-API_KEY = os.getenv("OPENROUTER_API_KEY") or os.getenv("HF_TOKEN")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
+API_DELAY = 1.0
 BENCHMARKS = ["POD_RECOVERY", "AUTOSCALING", "INCIDENT"]
 TASK_NAMES = ["pod_recovery", "autoscaling", "incident"]
 
@@ -94,6 +94,7 @@ SUCCESS_SCORE_THRESHOLD_BY_TASK: Dict[str, float] = {
 
 MAX_STALL_REPEATS = 4
 REWARD_EPSILON = 1e-9
+MAX_TASK_RETRIES_ON_CONNECTION_CLOSE = 1
 
 MAX_STEPS_BY_TASK = {
     "pod_recovery": 15,
@@ -147,7 +148,7 @@ def log_step(
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -370,89 +371,121 @@ def get_model_action(
             return _normalize_action(parsed)
         return _heuristic_action(task_name, observation, history)
     except Exception as exc:
-        print(f"[DEBUG] Model request failed: {exc}", flush=True)
+        print(f"Model request failed: {exc}", file=sys.stderr, flush=True)
         return _heuristic_action(task_name, observation, history)
 
 
 async def main() -> None:
-    if not API_KEY:
+    if not HF_TOKEN:
         raise RuntimeError("Missing HF_TOKEN/API_KEY for OpenAI client.")
     for TASK_NAME, BENCHMARK in zip(TASK_NAMES, BENCHMARKS):
-        client = OpenAI(base_url=LLM_BASE_URL, api_key=API_KEY)
-        max_steps = MAX_STEPS_BY_TASK.get(TASK_NAME, DEFAULT_MAX_STEPS)
-        grader = GRADERS.get(TASK_NAME, grade_pod_recovery)
+        retries_left = MAX_TASK_RETRIES_ON_CONNECTION_CLOSE
 
-        history: List[str] = []
-        rewards: List[float] = []
-        steps_taken = 0
-        score = 0.0
-        success = False
-        final_obs: Optional[Any] = None
-        episode_done = False
-        stalled = False
+        while True:
+            client = OpenAI(base_url=LLM_BASE_URL, api_key=HF_TOKEN)
+            max_steps = MAX_STEPS_BY_TASK.get(TASK_NAME, DEFAULT_MAX_STEPS)
+            grader = GRADERS.get(TASK_NAME, grade_pod_recovery)
 
-        log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+            history: List[str] = []
+            rewards: List[float] = []
+            steps_taken = 0
+            score = 0.0
+            success = False
+            final_obs: Optional[Any] = None
+            episode_done = False
+            stalled = False
+            should_retry_task = False
 
-        try:
-            async with CoEnv(base_url=ENV_URL) as env:
-                result = await env.reset(task=TASK_NAME)
-                final_obs = result.observation
+            log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
-                for step in range(1, max_steps + 1):
-                    if API_DELAY > 0:
-                        await asyncio.sleep(API_DELAY)
-                    if result.done:
+            try:
+                async with CoEnv(base_url=ENV_URL) as env:
+                    result = await env.reset(task=TASK_NAME)
+                    final_obs = result.observation
+
+                    for step in range(1, max_steps + 1):
+                        if API_DELAY > 0:
+                            await asyncio.sleep(API_DELAY)
+                        if result.done:
+                            log_step(
+                                step=step,
+                                action="",
+                                reward=result.reward or 0.0,
+                                done=True,
+                                error=None,
+                            )
+                            break
+
+                        action_payload = get_model_action(
+                            client, TASK_NAME, step, final_obs, history
+                        )
+                        action = CoenvAction(**action_payload)
+
+                        result = await env.step(action)
+                        obs = result.observation
+                        final_obs = obs
+
+                        reward = result.reward or 0.0
+                        done = result.done
+                        error = (
+                            (obs.metadata or {}).get("error")
+                            if hasattr(obs, "metadata")
+                            else None
+                        )
+
+                        rewards.append(reward)
+                        steps_taken = step
+                        episode_done = bool(done)
+
+                        action_str = json.dumps(action_payload, separators=(",", ":"))
                         log_step(
                             step=step,
-                            action="",
-                            reward=result.reward or 0.0,
-                            done=True,
-                            error=None,
+                            action=action_str,
+                            reward=reward,
+                            done=done,
+                            error=error,
                         )
-                        break
 
-                    action_payload = get_model_action(
-                        client, TASK_NAME, step, final_obs, history
+                        history.append(
+                            f"Step {step}: {action_str} -> reward {reward:+.2f}"
+                        )
+
+                        if done:
+                            break
+            except websockets.exceptions.ConnectionClosedError:
+                print(
+                    f"Connection closed unexpectedly for task={TASK_NAME}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                stalled = True
+                should_retry_task = retries_left > 0
+                if should_retry_task:
+                    print(
+                        f"Retrying task={TASK_NAME} ({MAX_TASK_RETRIES_ON_CONNECTION_CLOSE - retries_left + 1}/{MAX_TASK_RETRIES_ON_CONNECTION_CLOSE})",
+                        file=sys.stderr,
+                        flush=True,
                     )
-                    action = CoenvAction(**action_payload)
+            except Exception as exc:
+                print(
+                    f"Episode failed for task={TASK_NAME}: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                stalled = True
 
-                    result = await env.step(action)
-                    obs = result.observation
-                    final_obs = obs
+            finally:
+                world_state = _to_dict(final_obs) if final_obs is not None else {}
+                score = grader(world_state, steps_taken, max_steps)
+                score = min(max(score, 0.0), 1.0)
+                success = episode_done and not stalled and steps_taken > 0
 
-                    reward = result.reward or 0.0
-                    done = result.done
-                    error = (
-                        (obs.metadata or {}).get("error")
-                        if hasattr(obs, "metadata")
-                        else None
-                    )
+                log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
-                    rewards.append(reward)
-                    steps_taken = step
-                    episode_done = bool(done)
-
-                    action_str = json.dumps(action_payload, separators=(",", ":"))
-                    log_step(
-                        step=step,
-                        action=action_str,
-                        reward=reward,
-                        done=done,
-                        error=error,
-                    )
-
-                    history.append(f"Step {step}: {action_str} -> reward {reward:+.2f}")
-
-                    if done:
-                        break
-
-            world_state = _to_dict(final_obs) if final_obs is not None else {}
-            score = grader(world_state, steps_taken, max_steps)
-            score = min(max(score, 0.0), 1.0)
-            success = episode_done and not stalled and steps_taken > 0
-
-        finally:
-            log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+            if should_retry_task:
+                retries_left -= 1
+                continue
+            break
 
 
 if __name__ == "__main__":

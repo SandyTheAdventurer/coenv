@@ -15,15 +15,16 @@ tags:
 
 # Coenv Environment
 
-A Kubernetes incident-response simulation environment for OpenEnv. Provides a testbed for building and evaluating LLM agents that manage Kubernetes clusters through realistic scenarios.
+A Kubernetes cluster simulation environment for OpenEnv. Provides a testbed for building and evaluating LLM agents that manage Kubernetes clusters through realistic scenarios.
 
 ## Features
 
-- **Simulated Kubernetes Cluster**: Full cluster simulation including nodes, pods, deployments, services, ConfigMaps, and HPAs
+- **Simulated Kubernetes Cluster**: Full cluster simulation including nodes, pods, deployments, services, ConfigMaps, Secrets, Ingresses, PersistentVolumes/PVCs, and HPAs
 - **8 Action Types**: scale, patch, delete_pod, rollout_restart, set_hpa, drain_node, describe, wait
-- **3 Benchmark Tasks**: pod_recovery, autoscaling, incident
+- **6 Benchmark Tasks**: pod_recovery, autoscaling, incident, security, backup_recovery, resource_optimization
+- **Extended Observation**: Container logs, resource metrics (CPU/memory), cluster events
 - **Action Validation**: Validate actions before execution
-- **Configurable Grading**: Customizable reward functions per task
+- **Configurable Grading**: Multi-component rewards with partial credit per task
 
 ## Quick Start
 
@@ -60,6 +61,9 @@ asyncio.run(main())
 | `pod_recovery` | Frontend deployment crash-looping | Fix root cause, restore all pods to Running |
 | `autoscaling` | Traffic spike to backend | Configure HPA, ensure p95 latency < 500ms |
 | `incident` | Cascading failure across services | Identify root cause, restore all services |
+| `security` | Exposed credentials in ConfigMaps | Rotate secrets, migrate to K8s Secrets |
+| `backup_recovery` | PVC in Lost state | Restore PVC binding and database pod |
+| `resource_optimization` | Over-provisioned cluster | Downscale to optimal replica count |
 
 ## Building the Docker Image
 
@@ -101,7 +105,10 @@ Options:
 
 **CoenvObservation** contains:
 
-- `nodes`, `pods`, `deployments`, `services`, `configmaps`, `hpas`, `events`
+- `nodes`, `pods`, `deployments`, `services`, `configmaps`, `secrets`, `ingresses`
+- `persistentvolumes`, `persistentvolumeclaims`, `hpas`, `events`
+- `logs` (container log output for debugging)
+- `metrics` (CPU/memory usage per node)
 - `step` (int): Current simulation step
 - `objective` (str): Current task objective
 
@@ -114,7 +121,10 @@ With `StepResult` containing:
 Reward is task-dependent:
 - `pod_recovery`: Fraction of frontend pods in Running state
 - `autoscaling`: Backend availability (running ratio, stability, HPA config)
-- `incident`: Proportion of key services (auth-service, api-gateway, frontend) restored
+- `incident`: Proportion of key services restored (partial credit for 1/3, 2/3)
+- `security`: No exposed credentials + K8s Secrets used (0.4 CM + 0.6 secrets)
+- `backup_recovery`: PVC bound + PV bound + database ready (0.3 + 0.3 + 0.4)
+- `resource_optimization`: Optimal CPU/memory usage + reduced replicas
 
 ## Advanced Usage
 

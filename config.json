@@ -10,5 +10,13 @@
   "oom_kill_failure_rate": 0.6,
   "node_failure_rate": 0.3,
   "cascade_failure_probability": 0.5,
-  "task_timeout_values": 300
+  "task_timeout_values": 300,
+  "tasks": {
+    "pod_recovery": {"max_steps": 15, "success_threshold": 0.9},
+    "autoscaling": {"max_steps": 20, "success_threshold": 0.85},
+    "incident": {"max_steps": 30, "success_threshold": 0.80},
+    "security": {"max_steps": 20, "success_threshold": 0.85},
+    "backup_recovery": {"max_steps": 25, "success_threshold": 0.90},
+    "resource_optimization": {"max_steps": 20, "success_threshold": 0.75}
+  }
 }

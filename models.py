@@ -13,28 +13,22 @@ Kubernetes simulation.
 
 from openenv.core.env_server.types import Action, Observation, State
 from pydantic import Field
-from typing import Dict, Any, Optional, Literal, List
-
-try:
-    from .server.models import (
-        NodeStatus,
-        PodStatus,
-        DeploymentStatus,
-        ServiceStatus,
-        ConfigMapStatus,
-        HPAStatus,
-        ClusterEvent,
-    )
-except ImportError:
-    from server.models import (
-        NodeStatus,
-        PodStatus,
-        DeploymentStatus,
-        ServiceStatus,
-        ConfigMapStatus,
-        HPAStatus,
-        ClusterEvent,
-    )
+from typing import Dict, Any, Optional, List, Literal
+from server.models import (
+    NodeStatus,
+    PodStatus,
+    DeploymentStatus,
+    ServiceStatus,
+    ConfigMapStatus,
+    HPAStatus,
+    ClusterEvent,
+    SecretStatus,
+    IngressStatus,
+    PVStatus,
+    PVCStatus,
+    PodLog,
+    ResourceMetric,
+)
 
 
 class CoenvAction(Action):
@@ -54,7 +48,19 @@ class CoenvAction(Action):
     deployment: Optional[str] = Field(default=None)
     replicas: Optional[int] = Field(default=None)
     pod_name: Optional[str] = Field(default=None)
-    resource_type: Optional[Literal["deployment", "pod", "node", "service", "configmap", "hpa"]] = Field(default=None)
+    resource_type: Optional[
+        Literal[
+            "deployment",
+            "pod",
+            "node",
+            "service",
+            "configmap",
+            "hpa",
+            "secret",
+            "ingress",
+            "pvc",
+        ]
+    ] = Field(default=None)
     name: Optional[str] = Field(default=None)
     patch: Optional[Dict[str, Any]] = Field(default=None)
     min_replicas: Optional[int] = Field(default=None)
@@ -71,10 +77,17 @@ class CoenvObservation(Observation):
     deployments: List[DeploymentStatus] = Field(default_factory=list)
     services: List[ServiceStatus] = Field(default_factory=list)
     configmaps: List[ConfigMapStatus] = Field(default_factory=list)
+    secrets: List[SecretStatus] = Field(default_factory=list)
+    ingresses: List[IngressStatus] = Field(default_factory=list)
+    persistentvolumes: List[PVStatus] = Field(default_factory=list)
+    persistentvolumeclaims: List[PVCStatus] = Field(default_factory=list)
     hpas: List[HPAStatus] = Field(default_factory=list)
     events: List[ClusterEvent] = Field(default_factory=list)
+    logs: List[PodLog] = Field(default_factory=list)
+    metrics: List[ResourceMetric] = Field(default_factory=list)
     step: int = Field(default=0)
     objective: str = Field(default="")
+
 
 class CoenvState(State):
     """State model for the Kubernetes simulator."""
