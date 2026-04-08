@@ -65,7 +65,7 @@ After deployment:
 ### Build Image
 
 ```bash
-docker build -t coenv-env:latest -f server/Dockerfile .
+docker build -t coenv-env:latest -f Dockerfile .
 ```
 
 ### Run Locally

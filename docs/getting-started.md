@@ -61,7 +61,7 @@ print(f"Deployments: {len(obs.deployments)}")
 
 Build the Docker image:
 ```bash
-docker build -t coenv-env:latest -f server/Dockerfile .
+docker build -t coenv-env:latest -f Dockerfile .
 ```
 
 Run the container:
