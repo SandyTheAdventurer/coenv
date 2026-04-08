@@ -37,8 +37,24 @@ uv run uvicorn server.app:app --host 0.0.0.0 --port 8000 --workers 4
 
 Or use the direct entry point:
 ```bash
-uv run --project . server
-python -m coenv.server.app
+python -m server.app
+```
+
+## Quick Test
+
+Test the environment locally using Python:
+```python
+from server.coenv_environment import World
+from server.simulation_service import load_config
+
+config = load_config()
+world = World(config, seed=42)
+
+# Reset with a specific task
+obs = world.reset(condition=None)
+print(f"Step: {obs.step}")
+print(f"Pods: {len(obs.pods)}")
+print(f"Deployments: {len(obs.deployments)}")
 ```
 
 ## Docker Deployment
@@ -53,17 +69,30 @@ Run the container:
 docker run -p 8000:8000 coenv-env:latest
 ```
 
-## Deploy to Hugging Face Spaces
+## Testing Your Setup
 
+Run the tests to verify the setup:
 ```bash
-openenv push
+uv run pytest tests/
 ```
 
-See [Deployment](./deployment.md) for more options.
-
-## Quick Test
-
-Test the environment locally:
+Run the inference script:
 ```bash
-python3 server/coenv_environment.py
+uv run python inference.py
 ```
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `API_BASE_URL` | Server URL | `http://localhost:8000` |
+| `LLM_BASE_URL` | LLM API endpoint | `https://router.huggingface.co/v1` |
+| `MODEL_NAME` | Model identifier | `Qwen/Qwen3-8B` |
+| `HF_TOKEN` / `OPENROUTER_API_KEY` | API key | Required |
+
+## Next Steps
+
+- [Actions](./actions.md) - Available actions
+- [Models](./models.md) - Data models
+- [Client](./client.md) - Python client
+- [Deployment](./deployment.md) - Deploy to HuggingFace Spaces
