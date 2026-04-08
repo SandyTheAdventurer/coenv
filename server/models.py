@@ -58,6 +58,52 @@ class ServiceStatus(BaseModel):
     last_updated: str  # ISO timestamp
 
 
+class SecretStatus(BaseModel):
+    """Status of a Kubernetes Secret"""
+
+    name: str
+    type: Literal["Opaque", "kubernetes.io/tls", "kubernetes.io/basic-auth"]
+    data: Dict[str, str]  # base64 encoded values
+    last_updated: str
+
+
+class IngressStatus(BaseModel):
+    """Status of a Kubernetes Ingress"""
+
+    name: str
+    namespace: str = "default"
+    host: str
+    service_name: str
+    service_port: int
+    tls_enabled: bool = False
+    annotations: Dict[str, str] = Field(default_factory=dict)
+    last_updated: str
+
+
+class PVStatus(BaseModel):
+    """Status of a PersistentVolume"""
+
+    name: str
+    capacity: int  # in MB
+    access_modes: List[str]
+    reclaim_policy: Literal["Retain", "Delete"]
+    status: Literal["Bound", "Available", "Failed"]
+    claim_ref: Optional[str] = None
+    last_updated: str
+
+
+class PVCStatus(BaseModel):
+    """Status of a PersistentVolumeClaim"""
+
+    name: str
+    namespace: str = "default"
+    size: int  # in MB
+    access_modes: List[str]
+    status: Literal["Bound", "Pending", "Lost"]
+    volume_name: Optional[str] = None
+    last_updated: str
+
+
 class ConfigMapStatus(BaseModel):
     """Status of a Kubernetes ConfigMap"""
 
@@ -82,10 +128,32 @@ class ClusterEvent(BaseModel):
 
     event_id: str
     timestamp: str  # ISO timestamp
-    type: Literal["Normal", "Warning"]
+    type: Literal["Normal", "Warning", "Error"]
     reason: str
     message: str
     involved_object: str
+    node_name: Optional[str] = None
+    pod_name: Optional[str] = None
+
+
+class PodLog(BaseModel):
+    """Container log output"""
+
+    pod_name: str
+    container_name: str
+    log_content: str
+    timestamp: str
+
+
+class ResourceMetric(BaseModel):
+    """Resource usage metric"""
+
+    name: str
+    type: Literal["cpu", "memory", "storage"]
+    usage: float
+    capacity: float
+    usage_percent: float
+    timestamp: str
 
 
 class ClusterObservation(BaseModel):
@@ -96,10 +164,16 @@ class ClusterObservation(BaseModel):
     deployments: List[DeploymentStatus]
     services: List[ServiceStatus]
     configmaps: List[ConfigMapStatus]
+    secrets: List[SecretStatus] = Field(default_factory=list)
+    ingresses: List[IngressStatus] = Field(default_factory=list)
+    persistentvolumes: List[PVStatus] = Field(default_factory=list)
+    persistentvolumeclaims: List[PVCStatus] = Field(default_factory=list)
     hpas: List[HPAStatus] = Field(
         default_factory=list, validation_alias=AliasChoices("hpa", "hpas")
     )
     events: List[ClusterEvent]
+    logs: List[PodLog] = Field(default_factory=list)
+    metrics: List[ResourceMetric] = Field(default_factory=list)
     step: int
     objective: str
 

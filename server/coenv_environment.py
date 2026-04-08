@@ -18,6 +18,12 @@ from .models import (
     ClusterObservation,
     ConfigMapStatus,
     HPAStatus,
+    SecretStatus,
+    IngressStatus,
+    PVStatus,
+    PVCStatus,
+    PodLog,
+    ResourceMetric,
 )
 from .utils import set_random_seed
 
@@ -61,6 +67,10 @@ class World:
         deployments = []
         services = []
         configmaps = []
+        secrets = []
+        ingresses = []
+        persistentvolumes = []
+        persistentvolumeclaims = []
         hpas = []
 
         # Create some default deployments and their pods
@@ -190,12 +200,108 @@ class World:
                 }
             )
 
+        for hpa in default_hpas:
+            hpas.append(
+                {
+                    "name": hpa["name"],
+                    "min_replicas": hpa["min_replicas"],
+                    "max_replicas": hpa["max_replicas"],
+                    "current_replicas": hpa["min_replicas"],
+                    "cpu_target_percent": hpa["cpu_target_percent"],
+                    "last_updated": datetime.now().isoformat(),
+                }
+            )
+
+        # Create secrets
+        default_secrets = [
+            {
+                "name": "db-credentials",
+                "type": "Opaque",
+                "data": {"username": "admin", "password": "c2VjcmV0"},
+            },
+            {
+                "name": "tls-cert",
+                "type": "kubernetes.io/tls",
+                "data": {"cert": "LS0tLS1CR", "key": "LS0tLS1GSU"},
+            },
+        ]
+        for sec in default_secrets:
+            secrets.append(
+                {
+                    "name": sec["name"],
+                    "type": sec["type"],
+                    "data": sec["data"],
+                    "last_updated": datetime.now().isoformat(),
+                }
+            )
+
+        # Create ingresses
+        default_ingresses = [
+            {
+                "name": "frontend-ingress",
+                "host": "app.example.com",
+                "service_name": "frontend-service",
+                "service_port": 80,
+                "tls_enabled": True,
+            },
+        ]
+        for ing in default_ingresses:
+            ingresses.append(
+                {
+                    "name": ing["name"],
+                    "namespace": "default",
+                    "host": ing["host"],
+                    "service_name": ing["service_name"],
+                    "service_port": ing["service_port"],
+                    "tls_enabled": ing["tls_enabled"],
+                    "annotations": {"ingress.class": "nginx"},
+                    "last_updated": datetime.now().isoformat(),
+                }
+            )
+
+        # Create PVs and PVCs
+        pv1 = {
+            "name": "pv-database",
+            "capacity": 10240,
+            "access_modes": ["ReadWriteOnce"],
+            "reclaim_policy": "Retain",
+            "status": "Bound",
+            "claim_ref": "database-pvc",
+            "last_updated": datetime.now().isoformat(),
+        }
+        persistentvolumes.append(pv1)
+        pv2 = {
+            "name": "pv-logs",
+            "capacity": 5120,
+            "access_modes": ["ReadWriteMany"],
+            "reclaim_policy": "Delete",
+            "status": "Available",
+            "claim_ref": None,
+            "last_updated": datetime.now().isoformat(),
+        }
+        persistentvolumes.append(pv2)
+
+        pvc1 = {
+            "name": "database-pvc",
+            "namespace": "default",
+            "size": 10240,
+            "access_modes": ["ReadWriteOnce"],
+            "status": "Bound",
+            "volume_name": "pv-database",
+            "last_updated": datetime.now().isoformat(),
+        }
+        persistentvolumeclaims.append(pvc1)
+
         return {
             "nodes": nodes,
             "pods": pods,
             "deployments": deployments,
             "services": services,
             "configmaps": configmaps,
+            "secrets": secrets,
+            "ingresses": ingresses,
+            "persistentvolumes": persistentvolumes,
+            "persistentvolumeclaims": persistentvolumeclaims,
             "hpas": hpas,
         }
 
@@ -242,6 +348,27 @@ class World:
     def get_configmaps(self) -> List[ConfigMapStatus]:
         """Get all configmaps as Pydantic models"""
         return [ConfigMapStatus(**cm) for cm in self.cluster_state["configmaps"]]
+
+    def get_secrets(self) -> List[SecretStatus]:
+        """Get all secrets as Pydantic models"""
+        return [SecretStatus(**s) for s in self.cluster_state.get("secrets", [])]
+
+    def get_ingresses(self) -> List[IngressStatus]:
+        """Get all ingresses as Pydantic models"""
+        return [IngressStatus(**i) for i in self.cluster_state.get("ingresses", [])]
+
+    def get_persistentvolumes(self) -> List[PVStatus]:
+        """Get all PVs as Pydantic models"""
+        return [
+            PVStatus(**pv) for pv in self.cluster_state.get("persistentvolumes", [])
+        ]
+
+    def get_persistentvolumeclaims(self) -> List[PVCStatus]:
+        """Get all PVCs as Pydantic models"""
+        return [
+            PVCStatus(**pvc)
+            for pvc in self.cluster_state.get("persistentvolumeclaims", [])
+        ]
 
     def get_hpas(self) -> List[HPAStatus]:
         """Get all HPAs as Pydantic models"""
@@ -770,6 +897,54 @@ class World:
         if len(self.events) > 100:
             self.events = self.events[-50:]
 
+    def get_logs(self, deployment: str) -> List[PodLog]:
+        """Get logs for pods in a deployment"""
+        pods = self.get_pods(selector={"deployment": deployment})
+        logs = []
+        for pod in pods[:3]:
+            log_messages = [
+                f"[{pod.name}] Starting application...",
+                f"[{pod.name}] Server listening on port 8080",
+                f"[{pod.name}] Health check passed",
+                f"[{pod.name}] Processing request id={self.rng.integers(1000, 9999)}",
+            ]
+            logs.append(
+                PodLog(
+                    pod_name=pod.name,
+                    container_name="main",
+                    log_content="\n".join(log_messages[: self.rng.integers(2, 4)]),
+                    timestamp=datetime.now().isoformat(),
+                )
+            )
+        return logs
+
+    def get_metrics(self) -> List[ResourceMetric]:
+        """Get cluster resource metrics"""
+        metrics = []
+        nodes = self.cluster_state["nodes"]
+        for node in nodes:
+            metrics.append(
+                ResourceMetric(
+                    name=node["name"],
+                    type="cpu",
+                    usage=float(node.get("cpu_usage", 0)),
+                    capacity=float(node.get("cpu_capacity", 4)),
+                    usage_percent=float(node.get("cpu_usage", 0)),
+                    timestamp=datetime.now().isoformat(),
+                )
+            )
+            metrics.append(
+                ResourceMetric(
+                    name=node["name"],
+                    type="memory",
+                    usage=float(node.get("mem_usage", 0)),
+                    capacity=float(node.get("mem_capacity", 8192)),
+                    usage_percent=float(node.get("mem_usage", 0)),
+                    timestamp=datetime.now().isoformat(),
+                )
+            )
+        return metrics
+
     def get_full_state(self) -> Dict[str, Any]:
         """Get the full cluster state for debugging"""
         return {
@@ -778,6 +953,10 @@ class World:
             "deployments": self.get_deployments(),
             "services": self.get_services(),
             "configmaps": self.get_configmaps(),
+            "secrets": self.get_secrets(),
+            "ingresses": self.get_ingresses(),
+            "persistentvolumes": self.get_persistentvolumes(),
+            "persistentvolumeclaims": self.get_persistentvolumeclaims(),
             "hpas": self.get_hpas(),
             "events": self.get_events(),
             "step": self.step_count,
@@ -801,4 +980,6 @@ class World:
         """Serialises the current state into a ClusterObservation Pydantic model"""
         observation_dict = self.get_full_state()
         observation_dict["objective"] = objective
+        observation_dict["logs"] = self.get_logs("frontend") + self.get_logs("backend")
+        observation_dict["metrics"] = self.get_metrics()
         return ClusterObservation(**observation_dict)

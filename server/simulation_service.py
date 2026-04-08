@@ -56,6 +56,9 @@ def get_objective_for_task(task_id: str) -> str:
         "pod_recovery": "The frontend deployment is crash-looping. Diagnose and fix the root cause so that all pods reach Running state.",
         "autoscaling": "Traffic has spiked 10x. The api-server deployment is overloaded. Configure autoscaling and ensure p95 latency stays below 500ms.",
         "incident": "A cascading incident has degraded auth-service, api-gateway, and data-processor. Identify the root cause and restore all three services to healthy state without data loss.",
+        "resource_optimization": "The cluster is over-provisioned! Nodes are underutilized (CPU <20%, Memory <30%). Reduce costs by downscaling unused replicas while maintaining service availability (SLA >99%).",
+        "security": "A security scan found sensitive data (API keys, passwords) exposed in environment variables. Rotate all credentials, move secrets to Kubernetes Secrets, and verify no credentials are leaked.",
+        "backup_recovery": "The database PVC is in Lost state! The PersistentVolume is Available but the claim is broken. Restore data by recreating the PVC and ensuring the database pod mounts the correct volume.",
     }
     return objectives.get(task_id, "Maintain cluster health")
 
@@ -82,6 +85,27 @@ def get_condition_for_task(task_id: str, world: World, config: Dict[str, Any]):
         except ImportError:
             from conditions.cascade_failure import CascadeFailureCondition
         return CascadeFailureCondition(world, config)
+
+    if task_id == "security":
+        try:
+            from .conditions.secret_exposure import SecurityCondition
+        except ImportError:
+            from conditions.secret_exposure import SecurityCondition
+        return SecurityCondition(world, config)
+
+    if task_id == "backup_recovery":
+        try:
+            from .conditions.pvc_lost import PVCLostCondition
+        except ImportError:
+            from conditions.pvc_lost import PVCLostCondition
+        return PVCLostCondition(world, config)
+
+    if task_id == "resource_optimization":
+        try:
+            from .conditions.underutilization import UnderutilizationCondition
+        except ImportError:
+            from conditions.underutilization import UnderutilizationCondition
+        return UnderutilizationCondition(world, config)
 
     return None
 
@@ -134,6 +158,60 @@ def calculate_reward(world: World, task_id: str) -> float:
             if svc_pods and len(running) >= len(svc_pods) * 0.8:
                 healthy_count += 1
         return healthy_count / len(key_services) if key_services else 0.0
+
+    elif task_id == "security":
+        deployments = world.get_deployments()
+        configmaps = world.get_configmaps()
+        exposed_count = 0
+        sensitive_keys = {"API_KEY", "DB_PASSWORD", "JWT_SECRET", "SECRET", "PASSWORD"}
+        for cm in configmaps:
+            has_exposed = any(
+                k.upper() in sensitive_keys
+                or v in {"sk_live_", "p@ss", "secret", "超级"}
+                for k, v in cm.data.items()
+            )
+            if not has_exposed:
+                exposed_count += 1
+        secret_refs = world.get_secrets()
+        has_secrets = len(secret_refs) > 0
+        config_has_no_creds = exposed_count / len(configmaps) if configmaps else 1.0
+        return (0.4 * config_has_no_creds) + (0.6 * (1.0 if has_secrets else 0.0))
+
+    elif task_id == "backup_recovery":
+        pvcs = world.get_persistentvolumeclaims()
+        database_pvc = next((p for p in pvcs if p.name == "database-pvc"), None)
+        pvs = world.get_persistentvolumes()
+        pv_database = next((p for p in pvs if p.name == "pv-database"), None)
+        if database_pvc and pv_database:
+            pvc_bound = database_pvc.status == "Bound"
+            pv_bound = pv_database.status == "Bound"
+            pods = world.get_pods()
+            db_pods = [p for p in pods if p.deployment == "database"]
+            db_running = len([p for p in db_pods if p.status == "Running"])
+            db_ready = db_running / len(db_pods) if db_pods else 0.0
+            return (
+                (0.3 * (1.0 if pvc_bound else 0.0))
+                + (0.3 * (1.0 if pv_bound else 0.0))
+                + (0.4 * db_ready)
+            )
+        return 0.0
+
+    elif task_id == "resource_optimization":
+        nodes = world.get_nodes()
+        total_cpu = sum(n.cpu_usage for n in nodes) / len(nodes) if nodes else 100
+        total_mem = sum(n.mem_usage for n in nodes) / len(nodes) if nodes else 100
+        too_low = total_cpu < 20 or total_mem < 30
+        deployments = world.get_deployments()
+        total_replicas = sum(d.available_replicas for d in deployments)
+        ideal_replicas = 6
+        if total_replicas <= ideal_replicas and not too_low:
+            return 1.0
+        elif too_low:
+            savings_potential = (
+                1.0 - (ideal_replicas / total_replicas) if total_replicas > 0 else 0.0
+            )
+            return max(0.0, min(savings_potential, 0.7))
+        return 0.5
 
     return 0.0
 
@@ -272,6 +350,57 @@ def check_task_complete(
         )
         return had_problem and recovered and all_fixed
 
+    if task_id == "security":
+        configmaps = world.get_configmaps()
+        sensitive_keys = {"API_KEY", "DB_PASSWORD", "JWT_SECRET", "SECRET", "PASSWORD"}
+        has_exposed = any(
+            any(
+                k.upper() in sensitive_keys
+                or v in {"sk_live_", "p@ss", "secret", "超级", "_secret"}
+                for k, v in cm.data.items()
+            )
+            for cm in configmaps
+        )
+        secrets = world.get_secrets()
+        has_secrets = len(secrets) > 0
+        if not has_baseline:
+            return not has_exposed and has_secrets
+        had_problem = baseline.get("security_exposed_services", 0) > 0
+        recovered = not has_exposed and has_secrets
+        return had_problem and recovered
+
+    if task_id == "backup_recovery":
+        pvcs = world.get_persistentvolumeclaims()
+        pvc = next((p for p in pvcs if p.name == "database-pvc"), None)
+        pvs = world.get_persistentvolumes()
+        pv = next((p for p in pvs if p.name == "pv-database"), None)
+        pods = world.get_pods()
+        db_pods = [p for p in pods if p.deployment == "database"]
+        db_ready = all(p.status == "Running" for p in db_pods) if db_pods else False
+        if not has_baseline:
+            return (
+                (pvc and pvc.status == "Bound")
+                and (pv and pv.status == "Bound")
+                and db_ready
+            )
+        had_problem = baseline.get("pvc_status") == "Lost"
+        recovered = pvc and pvc.status == "Bound" and pv and pv.status == "Bound"
+        return had_problem and recovered and db_ready
+
+    if task_id == "resource_optimization":
+        nodes = world.get_nodes()
+        total_cpu = sum(n.cpu_usage for n in nodes) / len(nodes) if nodes else 100
+        total_mem = sum(n.mem_usage for n in nodes) / len(nodes) if nodes else 100
+        optimal = 25 <= total_cpu <= 70 and 35 <= total_mem <= 80
+        deployments = world.get_deployments()
+        total_replicas = sum(d.available_replicas for d in deployments)
+        ideal = 6
+        if not has_baseline:
+            return optimal and total_replicas <= ideal
+        had_problem = baseline.get("cluster_overprovisioned", True)
+        recovered = total_replicas <= ideal
+        return had_problem and recovered and optimal
+
     return False
 
 
@@ -312,6 +441,12 @@ class CoenvEnvironment(Environment):
                 CrashLoopCondition(self.world, self.config).inject(
                     target_deployment="frontend", failure_rate=0.5
                 )
+            elif task == "security":
+                condition.inject()
+            elif task == "backup_recovery":
+                condition.inject()
+            elif task == "resource_optimization":
+                condition.inject()
             self._baseline_metrics = _collect_task_metrics(self.world)
 
         self.world.tick()
@@ -414,8 +549,14 @@ class CoenvEnvironment(Environment):
             deployments=obs.deployments,
             services=obs.services,
             configmaps=obs.configmaps,
+            secrets=obs.secrets,
+            ingresses=obs.ingresses,
+            persistentvolumes=obs.persistentvolumes,
+            persistentvolumeclaims=obs.persistentvolumeclaims,
             hpas=obs.hpas,
             events=obs.events,
+            logs=obs.logs,
+            metrics=obs.metrics,
             step=obs.step,
             objective=obs.objective,
             done=done,
