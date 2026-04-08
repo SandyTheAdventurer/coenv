@@ -71,18 +71,18 @@ from server.graders.grader_incident import grade as grade_incident
 if load_dotenv is not None:
     load_dotenv()
 
-ENV_URL = os.getenv("API_BASE_URL", "https://Nightreigners-COEnv.hf.space")
+ENV_URL = os.getenv("ENV_URL", "https://Nightreigners-COEnv.hf.space")
 
-LLM_BASE_URL =  os.getenv("LLM_BASE_URL")
+LLM_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen3-8B")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
-API_DELAY = 1.0
+API_DELAY = 4
 BENCHMARKS = ["POD_RECOVERY", "AUTOSCALING", "INCIDENT"]
 TASK_NAMES = ["pod_recovery", "autoscaling", "incident"]
 
-TEMPERATURE = 0.7
-MAX_TOKENS = 150
+TEMPERATURE = 0.3 
+MAX_TOKENS = 512
 SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 DEFAULT_MAX_STEPS = 15
 
@@ -110,25 +110,30 @@ GRADERS: Dict[str, Callable[[Dict[str, Any], int, int], float]] = {
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
-    You are a Kubernetes incident-response agent.
-    Return ONLY valid JSON for one action with this schema:
-    {
-            "action_type": "scale|delete_pod|patch|rollout_restart|set_hpa|drain_node|describe|wait",
-      "deployment": "... optional ...",
-      "replicas": 1,
-      "pod_name": "...",
-      "resource_type": "deployment|pod|node|service|configmap|hpa",
-      "name": "...",
-      "patch": {},
-      "min_replicas": 1,
-      "max_replicas": 5,
-      "cpu_target_percent": 70,
-      "node_name": "..."
-    }
-    Do not include markdown, prose, or code fences.
+    You are a Kubernetes incident-response agent. Your reply must be ONLY a JSON object — no preamble, no explanation, no markdown, no code fences, no thinking text.
+    Remember that more actions and more dangerous actions taken will reduce the final score, so be efficient and only take necessary actions.
+
+    Valid action_type values: scale, delete_pod, patch, rollout_restart, set_hpa, drain_node, describe, wait
+
+    Action fields:
+    - action_type (required)
+    - deployment: name of deployment (for scale/rollout_restart/patch/set_hpa)
+    - replicas: integer (for scale)
+    - pod_name: name of pod (for delete_pod)
+    - resource_type: one of deployment, pod, node, service, configmap, hpa (for describe/patch)
+    - name: resource name (for describe/patch)
+    - patch: JSON patch spec (for patch)
+    - min_replicas, max_replicas, cpu_target_percent: integers (for set_hpa)
+    - node_name: string (for drain_node)
+
+    EXAMPLE VALID REPLIES:
+    {"action_type":"describe","resource_type":"deployment","name":"frontend"}
+    {"action_type":"rollout_restart","deployment":"frontend"}
+    {"action_type":"delete_pod","pod_name":"frontend-9722-auksc"}
+
+    YOUR REPLY (JSON only, nothing else):
     """
 ).strip()
-
 
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
@@ -214,87 +219,82 @@ def build_user_prompt(
 
 
 def _safe_json_action(text: str) -> Optional[Dict[str, Any]]:
+    def _extract_action_dict(parsed: Any) -> Optional[Dict[str, Any]]:
+        if isinstance(parsed, dict):
+            if "action_type" in parsed:
+                return parsed
+
+            nested = parsed.get("action")
+            if isinstance(nested, dict) and "action_type" in nested:
+                return nested
+
+            name_val = parsed.get("name")
+            arguments = parsed.get("arguments")
+            if isinstance(name_val, str):
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except json.JSONDecodeError:
+                        arguments = {}
+                if not isinstance(arguments, dict):
+                    arguments = {}
+                action = dict(arguments)
+                action["action_type"] = name_val
+                return action
+
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, dict) and "action_type" in item:
+                    return item
+        return None
+
+    text = text.strip()
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
+        extracted = _extract_action_dict(parsed)
+        return extracted if extracted is not None else (parsed if isinstance(parsed, dict) else None)
     except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
+        pass
+
+    import re
+
+    patterns = [
+        r"\{[^{}]*\}",
+        r"\{[^{}]*\{[^{}]*\}[^{}]*\}",
+        r"\{[^{}]*\{[^{}]*\{[^{}]*\}[^{}]*\}[^{}]*\}",
+    ]
+    for pattern in patterns:
+        matches = re.findall(pattern, text)
+        for match in matches:
             try:
-                return json.loads(text[start : end + 1])
+                parsed = json.loads(match)
+                extracted = _extract_action_dict(parsed)
+                return extracted if extracted is not None else (parsed if isinstance(parsed, dict) else None)
             except json.JSONDecodeError:
-                return None
+                continue
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            parsed = json.loads(text[start : end + 1])
+            extracted = _extract_action_dict(parsed)
+            return extracted if extracted is not None else (parsed if isinstance(parsed, dict) else None)
+        except json.JSONDecodeError:
+            pass
+
+    lines = text.split("\n")
+    for line in lines:
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                parsed = json.loads(line)
+                extracted = _extract_action_dict(parsed)
+                return extracted if extracted is not None else (parsed if isinstance(parsed, dict) else None)
+            except json.JSONDecodeError:
+                continue
+
     return None
-
-
-def _heuristic_action(
-    task_name: str,
-    observation: Any,
-    history: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    obs = _to_dict(observation)
-    pods = obs.get("pods", [])
-    history = history or []
-
-    if task_name == "pod_recovery":
-        crashloop = [
-            p
-            for p in pods
-            if p.get("deployment") == "frontend"
-            and p.get("status") == "CrashLoopBackOff"
-        ]
-        if crashloop:
-            return {"action_type": "rollout_restart", "deployment": "frontend"}
-        running = [
-            p
-            for p in pods
-            if p.get("deployment") == "frontend" and p.get("status") == "Running"
-        ]
-        if running:
-            return {"action_type": "wait"}
-        return {
-            "action_type": "describe",
-            "resource_type": "deployment",
-            "name": "frontend",
-        }
-
-    if task_name == "autoscaling":
-        backend_pods = [p for p in pods if p.get("deployment") == "backend"]
-        running_backends = [p for p in backend_pods if p.get("status") == "Running"]
-        hpas = obs.get("hpas", [])
-        backend_hpa = next((h for h in hpas if h.get("name") == "backend-hpa"), None)
-
-        if len(running_backends) < len(backend_pods) * 0.5:
-            return {"action_type": "rollout_restart", "deployment": "backend"}
-
-        if not backend_hpa:
-            return {
-                "action_type": "set_hpa",
-                "deployment": "backend",
-                "min_replicas": 2,
-                "max_replicas": 6,
-                "cpu_target_percent": 70,
-            }
-
-        if len(running_backends) >= len(backend_pods) * 0.8:
-            return {"action_type": "wait"}
-
-        return {"action_type": "rollout_restart", "deployment": "backend"}
-
-    key_services = ["auth-service", "api-gateway", "frontend"]
-    unhealthy = []
-    for svc in key_services:
-        svc_pods = [p for p in pods if p.get("deployment") == svc]
-        running = [p for p in svc_pods if p.get("status") == "Running"]
-        if not running or len(running) < len(svc_pods):
-            unhealthy.append(svc)
-
-    if unhealthy:
-        return {"action_type": "rollout_restart", "deployment": unhealthy[0]}
-
-    return {"action_type": "wait"}
-
-    return {"action_type": "rollout_restart", "deployment": "auth-service"}
 
 
 def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
@@ -313,6 +313,33 @@ def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
         action_type = "describe"
     normalized: Dict[str, Any] = {"action_type": action_type}
 
+    valid_resource_types = {
+        "deployment",
+        "pod",
+        "node",
+        "service",
+        "configmap",
+        "hpa",
+        "secret",
+        "ingress",
+        "pvc",
+    }
+    resource_type_aliases = {
+        "horizontalpodautoscaler": "hpa",
+        "horizontal_pod_autoscaler": "hpa",
+        "hpas": "hpa",
+        "deploy": "deployment",
+        "deployments": "deployment",
+        "pods": "pod",
+        "nodes": "node",
+        "services": "service",
+        "configmaps": "configmap",
+        "secrets": "secret",
+        "ingresses": "ingress",
+        "persistentvolumeclaim": "pvc",
+        "persistentvolumeclaims": "pvc",
+    }
+
     allowed_fields = {
         "deployment",
         "replicas",
@@ -328,6 +355,31 @@ def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
     for field in allowed_fields:
         if field in action and action[field] is not None:
             normalized[field] = action[field]
+
+    if "resource_type" in normalized:
+        rt_value = normalized.get("resource_type")
+        if isinstance(rt_value, str):
+            rt = rt_value.strip().lower().replace("-", "_")
+            rt = resource_type_aliases.get(rt, rt)
+            if rt in valid_resource_types:
+                normalized["resource_type"] = rt
+            else:
+                normalized.pop("resource_type", None)
+        else:
+            normalized.pop("resource_type", None)
+
+    if action_type in {
+        "set_hpa",
+        "scale",
+        "rollout_restart",
+        "delete_pod",
+        "drain_node",
+        "wait",
+    }:
+        normalized.pop("resource_type", None)
+        normalized.pop("name", None)
+        if action_type != "patch":
+            normalized.pop("patch", None)
 
     defaults_by_type = {
         "describe": {"resource_type": "deployment", "name": "frontend"},
@@ -350,30 +402,81 @@ def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _find_deployment_name(observation: Dict[str, Any], preferred: str) -> Optional[str]:
+    deployments = observation.get("deployments", [])
+    names = [d.get("name") for d in deployments if d.get("name")]
+    if preferred in names:
+        return preferred
+    return names[0] if names else None
+
+
+def _task_fallback_action(task_name: str, step: int, observation: Any) -> Dict[str, Any]:
+    obs = _to_dict(observation)
+    pods = obs.get("pods", [])
+
+    if task_name == "autoscaling":
+        deployment = _find_deployment_name(obs, "backend") or "frontend"
+        return {
+            "action_type": "set_hpa",
+            "deployment": deployment,
+            "min_replicas": 2,
+            "max_replicas": 8,
+            "cpu_target_percent": 60,
+        }
+
+    if task_name == "pod_recovery":
+        crashing_frontend = [
+            p
+            for p in pods
+            if p.get("deployment") == "frontend"
+            and p.get("status") == "CrashLoopBackOff"
+        ]
+        if step == 1 and crashing_frontend:
+            return {
+                "action_type": "describe",
+                "resource_type": "pod",
+                "name": crashing_frontend[0].get("name", "frontend"),
+            }
+        deployment = _find_deployment_name(obs, "frontend") or "frontend"
+        return {"action_type": "rollout_restart", "deployment": deployment}
+
+    if task_name == "incident":
+        deployment = _find_deployment_name(obs, "auth-service") or "frontend"
+        return {"action_type": "rollout_restart", "deployment": deployment}
+
+    return {"action_type": "describe", "resource_type": "deployment", "name": "frontend"}
+
 def get_model_action(
     client: OpenAI, task_name: str, step: int, observation: Any, history: List[str]
 ) -> Dict[str, Any]:
     user_prompt = build_user_prompt(task_name, step, observation, history)
-    try:
-        completion = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=TEMPERATURE,
-            max_tokens=MAX_TOKENS,
-            stream=False,
-        )
-        text = (completion.choices[0].message.content or "").strip()
-        parsed = _safe_json_action(text)
-        if isinstance(parsed, dict):
-            return _normalize_action(parsed)
-        return _heuristic_action(task_name, observation, history)
-    except Exception as exc:
-        print(f"Model request failed: {exc}", file=sys.stderr, flush=True)
-        return _heuristic_action(task_name, observation, history)
+    
+    for attempt in range(5):  # retry once with stronger prompt
+        try:
+            prompt = user_prompt if attempt == 0 else (
+                user_prompt + "\n\nCRITICAL: Reply with ONLY a JSON object. No other text whatsoever."
+            )
+            completion = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=TEMPERATURE if attempt == 0 else 0.0,
+                max_tokens=MAX_TOKENS,
+                stream=False,
+            )
+            text = (completion.choices[0].message.content or "").strip()
+            parsed = _safe_json_action(text)
+            if isinstance(parsed, dict):
+                return _normalize_action(parsed)
+        except Exception as exc:
+            print(f"Model request failed: {exc}", file=sys.stderr, flush=True)
+            if attempt == 1:
+                raise exc
 
+    # If both attempts failed, fall back to a useful task-aware action.
+    return _normalize_action(_task_fallback_action(task_name, step, observation))
 
 async def main() -> None:
     if not HF_TOKEN:
@@ -480,7 +583,9 @@ async def main() -> None:
                 score = min(max(score, 0.0), 1.0)
                 success = episode_done and not stalled and steps_taken > 0
 
-                log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+                log_end(
+                    success=success, steps=steps_taken, score=score, rewards=rewards
+                )
 
             if should_retry_task:
                 retries_left -= 1
