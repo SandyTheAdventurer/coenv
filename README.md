@@ -19,12 +19,11 @@ A Kubernetes cluster simulation environment for OpenEnv. Provides a testbed for 
 
 ## Features
 
-- **Simulated Kubernetes Cluster**: Full cluster simulation including nodes, pods, deployments, services, ConfigMaps, Secrets, Ingresses, PersistentVolumes/PVCs, and HPAs
+- **Simulated Kubernetes Cluster**: Full cluster simulation including nodes, pods, deployments, services, ConfigMaps, and HPAs
 - **8 Action Types**: scale, patch, delete_pod, rollout_restart, set_hpa, drain_node, describe, wait
-- **6 Benchmark Tasks**: pod_recovery, autoscaling, incident, security, backup_recovery, resource_optimization
-- **Extended Observation**: Container logs, resource metrics (CPU/memory), cluster events
+- **3 Benchmark Tasks**: pod_recovery, autoscaling, incident
 - **Action Validation**: Validate actions before execution
-- **Configurable Grading**: Multi-component rewards with partial credit per task
+- **Configurable Grading**: Customizable reward functions per task
 
 ## Quick Start
 
@@ -56,14 +55,11 @@ asyncio.run(main())
 
 ## Benchmark Tasks
 
-| Task | Description | Objective |
-|------|-------------|-----------|
-| `pod_recovery` | Frontend deployment crash-looping | Fix root cause, restore all pods to Running |
-| `autoscaling` | Traffic spike to backend | Configure HPA, ensure p95 latency < 500ms |
-| `incident` | Cascading failure across services | Identify root cause, restore all services |
-| `security` | Exposed credentials in ConfigMaps | Rotate secrets, migrate to K8s Secrets |
-| `backup_recovery` | PVC in Lost state | Restore PVC binding and database pod |
-| `resource_optimization` | Over-provisioned cluster | Downscale to optimal replica count |
+| Task | Description | Difficulty |
+|------|-------------|------------|
+| `pod_recovery` | Frontend deployment crash-looping | Easy |
+| `autoscaling` | Traffic spike to backend | Medium |
+| `incident` | Cascading failure across services | Hard |
 
 ## Building the Docker Image
 
@@ -105,10 +101,7 @@ Options:
 
 **CoenvObservation** contains:
 
-- `nodes`, `pods`, `deployments`, `services`, `configmaps`, `secrets`, `ingresses`
-- `persistentvolumes`, `persistentvolumeclaims`, `hpas`, `events`
-- `logs` (container log output for debugging)
-- `metrics` (CPU/memory usage per node)
+- `nodes`, `pods`, `deployments`, `services`, `configmaps`, `hpas`, `events`
 - `step` (int): Current simulation step
 - `objective` (str): Current task objective
 
@@ -121,10 +114,7 @@ With `StepResult` containing:
 Reward is task-dependent:
 - `pod_recovery`: Fraction of frontend pods in Running state
 - `autoscaling`: Backend availability (running ratio, stability, HPA config)
-- `incident`: Proportion of key services restored (partial credit for 1/3, 2/3)
-- `security`: No exposed credentials + K8s Secrets used (0.4 CM + 0.6 secrets)
-- `backup_recovery`: PVC bound + PV bound + database ready (0.3 + 0.3 + 0.4)
-- `resource_optimization`: Optimal CPU/memory usage + reduced replicas
+- `incident`: Proportion of key services (auth-service, api-gateway, frontend) restored
 
 ## Advanced Usage
 
@@ -165,7 +155,7 @@ uv run python inference.py
 
 ```
 coenv/
-├── docs/                    # Documentation
+├── docs/                    # Documentation (MkDocs source)
 ├── server/                  # Server implementation
 │   ├── app.py               # FastAPI app entry point
 │   ├── simulation_service.py # Environment logic
@@ -173,12 +163,21 @@ coenv/
 │   ├── executor.py          # Action execution
 │   ├── validator.py         # Action validation
 │   ├── models.py           # Server-side data models
-│   ├── actions/            # Action definitions
-│   ├── conditions/         # Failure condition injectors
-│   └── graders/            # Task grading functions
+│   ├── actions/            # Action definitions (scale, patch, delete, etc.)
+│   ├── conditions/         # Failure condition injectors (crash_loop, oom_kill, etc.)
+│   ├── graders/           # Task grading functions
+│   ├── tasks/              # Task definitions (pod_recovery, autoscaling, incident)
+│   ├── Dockerfile          # Docker container build
+│   └── requirements.txt    # Server dependencies
+├── tests/                   # Unit tests
 ├── models.py                # Public action/observation models
 ├── client.py                # Python client
-└── inference.py             # Example inference script
+├── inference.py             # Example inference script
+├── openenv.yaml            # OpenEnv specification
+├── pyproject.toml          # Python project config
+├── mkdocs.yml              # Documentation config
+├── pre-submission.sh       # Pre-submission validation script
+└── config.json             # Environment configuration
 ```
 
 ## Environment Variables
@@ -188,4 +187,24 @@ coenv/
 | `API_BASE_URL` | Server URL | `http://localhost:8000` |
 | `LLM_BASE_URL` | LLM API endpoint | `https://router.huggingface.co/v1` |
 | `MODEL_NAME` | Model identifier | `Qwen/Qwen3-8B` |
-| `HF_TOKEN` / `OPENROUTER_API_KEY` | API key | Required |
+| `HF_TOKEN` | API key | Required |
+
+## Building Documentation
+
+This project uses MkDocs with Material theme for documentation.
+
+```bash
+# Install dependencies (if not already installed)
+uv sync
+
+# Serve documentation locally (with live reload)
+mkdocs serve
+
+# Build static documentation
+mkdocs build
+
+# Deploy to GitHub Pages
+mkdocs gh-deploy
+```
+
+For more details, see `mkdocs.yml` configuration.
