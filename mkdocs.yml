@@ -1,1 +1,44 @@
-site_name: coenv
+site_name: COEnv
+site_description: Kubernetes cluster simulation environment for OpenEnv
+site_url: https://github.com/your-org/COEnv
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+    - scheme: slate
+      primary: deep-orange
+      accent: deep-orange
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.top
+    - search.highlight
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Actions: actions.md
+  - Models: models.md
+  - Server: server.md
+  - Client: client.md
+  - Deployment: deployment.md
+
+markdown_extensions:
+  - admonition
+  - codehilite:
+      guess_lang: false
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.tabbed
+
+plugins:
+  - search
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/your-org/COEnv
