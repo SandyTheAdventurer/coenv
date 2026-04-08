@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 class PodStatus(BaseModel):
     name: str
     namespace: str = "default"
-    status: Literal["Running", "Pending", "CrashLoopBackOff", "OOMKilled", "Terminating", "Unknown"]
+    status: Literal["Running", "Pending", "CrashLoopBackOff", "OOMKilled", "Terminating", "Unknown", "Failed", "Succeeded"]
     node: Optional[str] = None
     restarts: int = 0
     cpu_usage: float = 0.0
@@ -107,7 +107,7 @@ class NodeStatus(BaseModel):
 class PodStatus(BaseModel):
     """Status of a Kubernetes pod"""
     name: str
-    status: Literal["Pending", "Running", "Succeeded", "Failed", "Unknown", "CrashLoopBackOff"]
+    status: Literal["Pending", "Running", "Succeeded", "Failed", "Unknown", "CrashLoopBackOff", "OOMKilled", "Terminating"]
     node: Optional[str] = None
     restarts: int = 0
     cpu_request: int = Field(default=0)  # in millicores

@@ -41,9 +41,9 @@ class OOMKillCondition:
             
             for pod in pods:
                 if failure_rate is not None and float(self.world.rng.random()) < failure_rate:
-                    # Simulate OOMKill by setting high memory usage and restart count
+                    # Simulate OOMKill by setting OOMKilled status and high restart count
                     patch = {
-                        "status": "Running",  # OOMKill pods often show as Running but crash
+                        "status": "OOMKilled",
                         "restarts": int(self.world.rng.integers(10, 31))  # High restart count from OOM
                     }
                     self.world.apply_patch("pod", pod.name, patch)

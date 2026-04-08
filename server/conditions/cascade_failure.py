@@ -27,14 +27,13 @@ class CascadeFailureCondition:
             failure_probability = float(failure_probability)
             
         if root_cause_service is None:
-            critical_services = ["auth-service", "database", "api-gateway"]
+            critical_services = ["auth-service", "api-gateway"]
             deployments = self.world.get_deployments()
             critical_deployments = [d for d in deployments if d.name in critical_services]
             if critical_deployments:
                 root_cause_service = self.world.rng.choice(critical_deployments).name
             else:
-                deployments = self.world.get_deployments()
-                root_cause_service = self.world.rng.choice(deployments).name if deployments else "frontend"
+                root_cause_service = "api-gateway"
         
         root_deployment = next((d for d in self.world.get_deployments() if d.name == root_cause_service), None)
         if root_deployment:
@@ -44,27 +43,21 @@ class CascadeFailureCondition:
             
             self._add_cascade_event(f"Root cause failure in {root_cause_service}", "Warning")
         
-        deployments = self.world.get_deployments()
+        # Target specific services that should fail in the incident task
+        target_services = ["auth-service", "api-gateway", "frontend"]
+        
         for deployment in deployments:
-            if deployment.name != root_cause_service and failure_probability is not None and float(self.world.rng.random()) < failure_probability:
-                failure_type = str(self.world.rng.choice(["crashloop", "oom", "slow"]))
+            if deployment.name in target_services and deployment.name != root_cause_service:
+                failure_type = str(self.world.rng.choice(["crashloop", "oom"]))
                 
                 if failure_type == "crashloop":
                     from .crash_loop import CrashLoopCondition
                     condition = CrashLoopCondition(self.world, self.config)
-                    condition.inject(target_deployment=deployment.name, failure_rate=0.6)
+                    condition.inject(target_deployment=deployment.name, failure_rate=0.7)
                 elif failure_type == "oom":
                     from .oom_kill import OOMKillCondition
                     condition = OOMKillCondition(self.world, self.config)
-                    condition.inject(target_deployment=deployment.name, failure_rate=0.6)
-                else:
-                    pods = [p for p in self.world.get_pods() if p.deployment == deployment.name]
-                    for pod in pods[:1]:
-                        patch = {
-                            "cpu_request": int(pod.cpu_request * 1.5) if pod.cpu_request else 750,
-                            "mem_request": int(pod.mem_request * 1.5) if pod.mem_request else 384
-                        }
-                        self.world.apply_patch("pod", pod.name, patch)
+                    condition.inject(target_deployment=deployment.name, failure_rate=0.7)
                 
                 self._add_cascade_event(f"Cascading failure detected in {deployment.name}", "Warning")
     

@@ -152,14 +152,26 @@ def check_task_complete(world: World, task_id: str) -> bool:
 class CoenvEnvironment(Environment):
     """OpenEnv environment adapter over the in-memory Kubernetes simulator."""
 
-    SUPPORTS_CONCURRENT_SESSIONS: bool = True
+    # Class-level storage for world and config - persists across close()
+    _class_world = None
+    _class_config = None
+    _class_current_task = None
+    _class_current_objective = None
+    
+    SUPPORTS_CONCURRENT_SESSIONS: bool = False  # Use single instance per session
 
     def __init__(self):
         self._state = State(episode_id="default", step_count=0)
-        self.config: Dict[str, Any] = load_config()
-        self.world = World(self.config, seed=self.config.get("seed"))
-        self.current_task = "pod_recovery"
-        self.current_objective = get_objective_for_task(self.current_task)
+        
+        # Use class-level world if available, otherwise create new
+        if CoenvEnvironment._class_world is None:
+            CoenvEnvironment._class_config = load_config()
+            CoenvEnvironment._class_world = World(CoenvEnvironment._class_config, seed=CoenvEnvironment._class_config.get("seed"))
+        
+        self.world = CoenvEnvironment._class_world
+        self.config = CoenvEnvironment._class_config
+        self.current_task = CoenvEnvironment._class_current_task or "pod_recovery"
+        self.current_objective = CoenvEnvironment._class_current_objective or get_objective_for_task(self.current_task)
 
     @property
     def state(self) -> State:
@@ -167,6 +179,10 @@ class CoenvEnvironment(Environment):
 
     def close(self) -> None:
         """Clean up resources."""
+        pass
+    
+    def __del__(self):
+        """Destructor"""
         pass
 
     def reset(self, task: str = "pod_recovery", seed: int = None, episode_id: str = None, **_: Any) -> CoenvObservation:
@@ -176,8 +192,26 @@ class CoenvEnvironment(Environment):
         self._state.step_count = 0
         self.current_task = task
         self.current_objective = get_objective_for_task(task)
+        
+        # Store at class level so new instances see it
+        CoenvEnvironment._class_current_task = task
+        CoenvEnvironment._class_current_objective = self.current_objective
+        
+        # Get condition and inject the specific failure for this task
         condition = get_condition_for_task(task, self.world, self.config)
-        self.world.reset(condition)
+        
+        # Reset to healthy first, then inject the condition
+        self.world.reset_to_healthy()
+        
+        if condition:
+            # Inject specific failure based on task
+            if task == "pod_recovery":
+                condition.inject("frontend")
+            elif task == "autoscaling":
+                condition.inject("backend")
+            elif task == "incident":
+                condition.inject()
+        
         return self._observation(done=False, reward=0.0, info={"task": task})
 
     def step(self, action: CoenvAction, timeout_s: float = None, **_: Any) -> CoenvObservation:

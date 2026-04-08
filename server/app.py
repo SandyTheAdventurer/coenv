@@ -18,7 +18,7 @@ except ImportError:
     from simulation_service import CoenvEnvironment
 
 
-app = create_app(CoenvEnvironment, CoenvAction, CoenvObservation, max_concurrent_envs=4)
+app = create_app(CoenvEnvironment, CoenvAction, CoenvObservation, max_concurrent_envs=1)
 
 
 @app.get("/health")
