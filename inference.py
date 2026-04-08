@@ -4,8 +4,9 @@ Inference Script Example
 MANDATORY
 - Before submitting, ensure the following variables are defined in your environment configuration:
     API_BASE_URL   The API endpoint for the LLM.
+    API_KEY        The API key for the LLM proxy.
     MODEL_NAME     The model identifier to use for inference.
-    HF_TOKEN       Your Hugging Face / API key.
+    HF_TOKEN       Optional local fallback API key.
     LOCAL_IMAGE_NAME The name of the local image to use for the environment if you are using from_docker_image()
                      method
 
@@ -73,9 +74,13 @@ if load_dotenv is not None:
 
 ENV_URL = os.getenv("ENV_URL", "https://Nightreigners-COEnv.hf.space")
 
-LLM_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen3-8B")
-HF_TOKEN = os.getenv("HF_TOKEN")
+LLM_BASE_URL = (
+    os.getenv("API_BASE_URL")
+    or os.getenv("LLM_BASE_URL")
+    or "https://router.huggingface.co/v1"
+)
+MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3-8B")
+API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
 
 API_DELAY = 4
 BENCHMARKS = ["POD_RECOVERY", "AUTOSCALING", "INCIDENT"]
@@ -479,13 +484,13 @@ def get_model_action(
     return _normalize_action(_task_fallback_action(task_name, step, observation))
 
 async def main() -> None:
-    if not HF_TOKEN:
-        raise RuntimeError("Missing HF_TOKEN/API_KEY for OpenAI client.")
+    if not API_KEY:
+        raise RuntimeError("Missing API_KEY (or fallback HF_TOKEN/OPENAI_API_KEY) for OpenAI client.")
     for TASK_NAME, BENCHMARK in zip(TASK_NAMES, BENCHMARKS):
         retries_left = MAX_TASK_RETRIES_ON_CONNECTION_CLOSE
 
         while True:
-            client = OpenAI(base_url=LLM_BASE_URL, api_key=HF_TOKEN)
+            client = OpenAI(base_url=LLM_BASE_URL, api_key=API_KEY)
             max_steps = MAX_STEPS_BY_TASK.get(TASK_NAME, DEFAULT_MAX_STEPS)
             grader = GRADERS.get(TASK_NAME, grade_pod_recovery)
 
