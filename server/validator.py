@@ -8,6 +8,7 @@ from server.actions import (
     SetHPAAction,
     DrainNodeAction,
     DescribeAction,
+    WaitAction,
 )
 
 
@@ -26,6 +27,8 @@ def validate(action: KubeAction, world_state: Dict[str, Any]) -> Optional[str]:
         return _validate_drain_node(action, world_state)
     elif isinstance(action, DescribeAction):
         return _validate_describe(action, world_state)
+    elif isinstance(action, WaitAction):
+        return None
     return None
 
 

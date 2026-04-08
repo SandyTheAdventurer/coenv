@@ -596,7 +596,7 @@ class World:
         """Reset the world state and optionally inject a failure condition"""
         self.reset_to_healthy()
         if condition:
-            condition.inject(self)
+            condition.inject()
         return self.get_observation()
     
     def get_observation(self, objective: str = "Maintain cluster health"):
