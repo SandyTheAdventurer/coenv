@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 import json
 import os
 from openenv.core.env_server.interfaces import Environment
+
 try:
     from .coenv_environment import World
 except ImportError:
@@ -101,7 +102,8 @@ def calculate_reward(world: World, task_id: str) -> float:
         if backend_pods:
             running_ratio = min(len(running) / len(backend_pods), 1.0)
             unstable = [
-                p for p in backend_pods
+                p
+                for p in backend_pods
                 if p.status != "Running" or getattr(p, "restarts", 0) >= 5
             ]
             stability_ratio = 1.0 - (len(unstable) / len(backend_pods))
@@ -115,7 +117,11 @@ def calculate_reward(world: World, task_id: str) -> float:
                 and backend_hpa.cpu_target_percent <= 70
             )
 
-            reward = (0.5 * running_ratio) + (0.3 * stability_ratio) + (0.2 * (1.0 if hpa_ok else 0.0))
+            reward = (
+                (0.5 * running_ratio)
+                + (0.3 * stability_ratio)
+                + (0.2 * (1.0 if hpa_ok else 0.0))
+            )
             return min(max(reward, 0.0), 1.0)
 
     elif task_id == "incident":
@@ -148,7 +154,8 @@ def _collect_task_metrics(world: World) -> Dict[str, Any]:
     def _deployment_unstable_count(name: str, restart_threshold: int = 5) -> int:
         dep_pods = [p for p in pods if p.deployment == name]
         unstable = [
-            p for p in dep_pods
+            p
+            for p in dep_pods
             if p.status != "Running"
             or p.status == "CrashLoopBackOff"
             or getattr(p, "restarts", 0) >= restart_threshold
@@ -172,7 +179,9 @@ def _collect_task_metrics(world: World) -> Dict[str, Any]:
     backend_dep = next((d for d in deployments if d.name == "backend"), None)
     backend_available_ratio = 0.0
     if backend_dep is not None and backend_dep.desired_replicas > 0:
-        backend_available_ratio = backend_dep.available_replicas / backend_dep.desired_replicas
+        backend_available_ratio = (
+            backend_dep.available_replicas / backend_dep.desired_replicas
+        )
 
     return {
         "frontend_unstable": _deployment_unstable_count("frontend"),
@@ -182,31 +191,54 @@ def _collect_task_metrics(world: World) -> Dict[str, Any]:
         "backend_hpa_ok": backend_hpa_ok,
         "backend_available_ratio": backend_available_ratio,
         "incident_unhealthy_services": incident_unhealthy_services,
-        "incident_key_unstable": sum(_deployment_unstable_count(svc) for svc in key_services),
+        "incident_key_unstable": sum(
+            _deployment_unstable_count(svc) for svc in key_services
+        ),
     }
 
 
-def check_task_complete(world: World, task_id: str, baseline_metrics: Optional[Dict[str, Any]] = None) -> bool:
+def check_task_complete(
+    world: World, task_id: str, baseline_metrics: Optional[Dict[str, Any]] = None
+) -> bool:
     """Check if task objective is complete via observable state recovery."""
     metrics = _collect_task_metrics(world)
     baseline = baseline_metrics or {}
     has_baseline = bool(baseline)
 
+    injected_failures = getattr(world, "_injected_failures", {})
+
     if task_id == "pod_recovery":
+        frontend_fixed = (
+            "frontend" not in injected_failures
+            or injected_failures.get("frontend", {}).get("failure_type") is None
+        )
+
         if not has_baseline:
-            return metrics["frontend_unstable"] == 0 and metrics["frontend_running_ratio"] >= 1.0
+            return (
+                metrics["frontend_unstable"] == 0
+                and metrics["frontend_running_ratio"] >= 1.0
+                and frontend_fixed
+            )
         had_problem = baseline.get("frontend_unstable", 0) > 0
-        recovered = metrics["frontend_unstable"] == 0 and metrics["frontend_running_ratio"] >= 1.0
-        improved = metrics["frontend_unstable"] < baseline.get("frontend_unstable", 0)
-        return had_problem and recovered and improved
+        recovered = (
+            metrics["frontend_unstable"] == 0
+            and metrics["frontend_running_ratio"] >= 1.0
+        )
+        return had_problem and recovered and frontend_fixed
 
     if task_id == "autoscaling":
+        backend_fixed = (
+            "backend" not in injected_failures
+            or injected_failures.get("backend", {}).get("failure_type") is None
+        )
+
         if not has_baseline:
             return (
                 metrics["backend_unstable"] == 0
                 and metrics["backend_running_ratio"] >= 1.0
                 and metrics["backend_available_ratio"] >= 1.0
                 and metrics["backend_hpa_ok"]
+                and backend_fixed
             )
         had_problem = baseline.get("backend_unstable", 0) > 0
         recovered = (
@@ -214,15 +246,21 @@ def check_task_complete(world: World, task_id: str, baseline_metrics: Optional[D
             and metrics["backend_running_ratio"] >= 1.0
             and metrics["backend_available_ratio"] >= 1.0
         )
-        improved = metrics["backend_unstable"] < baseline.get("backend_unstable", 0)
-        # For autoscaling, both state recovery and effective HPA policy must be visible.
-        return had_problem and recovered and improved and metrics["backend_hpa_ok"]
+        return had_problem and recovered and metrics["backend_hpa_ok"] and backend_fixed
 
     if task_id == "incident":
+        key_services = ["auth-service", "api-gateway", "frontend"]
+        all_fixed = all(
+            svc not in injected_failures
+            or injected_failures.get(svc, {}).get("failure_type") is None
+            for svc in key_services
+        )
+
         if not has_baseline:
             return (
                 metrics["incident_unhealthy_services"] == 0
                 and metrics["incident_key_unstable"] == 0
+                and all_fixed
             )
         had_problem = (
             baseline.get("incident_unhealthy_services", 0) > 0
@@ -232,11 +270,7 @@ def check_task_complete(world: World, task_id: str, baseline_metrics: Optional[D
             metrics["incident_unhealthy_services"] == 0
             and metrics["incident_key_unstable"] == 0
         )
-        improved = (
-            metrics["incident_unhealthy_services"] < baseline.get("incident_unhealthy_services", 0)
-            or metrics["incident_key_unstable"] < baseline.get("incident_key_unstable", 0)
-        )
-        return had_problem and recovered and improved
+        return had_problem and recovered and all_fixed
 
     return False
 
@@ -258,8 +292,6 @@ class CoenvEnvironment(Environment):
         self.current_objective = get_objective_for_task(task)
         condition = get_condition_for_task(task, self.world, self.config)
 
-        # Inject deterministic, task-specific failures so episodes don't start
-        # in an already-solved state.
         self.world.reset_to_healthy()
         if condition is not None:
             if task == "pod_recovery":
@@ -267,15 +299,22 @@ class CoenvEnvironment(Environment):
             elif task == "autoscaling":
                 condition.inject(target_deployment="backend", failure_rate=0.8)
             elif task == "incident":
-                condition.inject(root_cause_service="auth-service", failure_probability=0.8)
+                condition.inject(
+                    root_cause_service="auth-service", failure_probability=0.8
+                )
                 try:
                     from .conditions.crash_loop import CrashLoopCondition
                 except ImportError:
                     from conditions.crash_loop import CrashLoopCondition
-                # Ensure cascading impact reaches key downstream services.
-                CrashLoopCondition(self.world, self.config).inject(target_deployment="api-gateway", failure_rate=0.7)
-                CrashLoopCondition(self.world, self.config).inject(target_deployment="frontend", failure_rate=0.5)
+                CrashLoopCondition(self.world, self.config).inject(
+                    target_deployment="api-gateway", failure_rate=0.7
+                )
+                CrashLoopCondition(self.world, self.config).inject(
+                    target_deployment="frontend", failure_rate=0.5
+                )
             self._baseline_metrics = _collect_task_metrics(self.world)
+
+        self.world.tick()
         return self._observation(done=False, reward=0.0, info={"task": task})
 
     def step(self, action: CoenvAction, **_: Any) -> CoenvObservation:
@@ -314,9 +353,17 @@ class CoenvEnvironment(Environment):
 
             elif action.action_type == "set_hpa":
                 deployment = action.deployment or ""
-                min_replicas = action.min_replicas if action.min_replicas is not None else 1
-                max_replicas = action.max_replicas if action.max_replicas is not None else 10
-                cpu_target = action.cpu_target_percent if action.cpu_target_percent is not None else 80
+                min_replicas = (
+                    action.min_replicas if action.min_replicas is not None else 1
+                )
+                max_replicas = (
+                    action.max_replicas if action.max_replicas is not None else 10
+                )
+                cpu_target = (
+                    action.cpu_target_percent
+                    if action.cpu_target_percent is not None
+                    else 80
+                )
                 self.world.set_hpa(deployment, min_replicas, max_replicas, cpu_target)
                 info["hpa_set"] = deployment
 
@@ -339,24 +386,27 @@ class CoenvEnvironment(Environment):
 
         reward = calculate_reward(self.world, self.current_task)
 
-        done = check_task_complete(self.world, self.current_task, self._baseline_metrics)
-        max_steps = self.config.get("tasks", {}).get(self.current_task, {}).get("max_steps", 15)
-        if self.world.step_count >= max_steps and not done:
+        done = check_task_complete(
+            self.world, self.current_task, self._baseline_metrics
+        )
+        max_steps = (
+            self.config.get("tasks", {}).get(self.current_task, {}).get("max_steps", 15)
+        )
+        truncated = self.world.step_count >= max_steps and not done
+        if truncated:
             info["truncated"] = True
+            done = True
 
         return self._observation(done=done, reward=reward, info=info)
-    
+
     @property
     def state(self) -> CoenvState:
         """Return current observation without applying an action."""
-        reward = calculate_reward(self.world, self.current_task)
-        done = check_task_complete(self.world, self.current_task, self._baseline_metrics)
-        return CoenvState(
-            episode_id=self.episode_id,
-            step_count=self.world.step_count
-        )
+        return CoenvState(episode_id=self.episode_id, step_count=self.world.step_count)
 
-    def _observation(self, done: bool, reward: float, info: Dict[str, Any]) -> CoenvObservation:
+    def _observation(
+        self, done: bool, reward: float, info: Dict[str, Any]
+    ) -> CoenvObservation:
         obs = self.world.get_observation(self.current_objective)
         return CoenvObservation(
             nodes=obs.nodes,
@@ -372,5 +422,6 @@ class CoenvEnvironment(Environment):
             reward=reward,
             metadata=info,
         )
+
     def close(self) -> None:
         return
