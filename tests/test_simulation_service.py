@@ -10,17 +10,30 @@ from models import CoenvAction
 
 
 class StubPod:
-    def __init__(self, deployment: str, status: str):
+    def __init__(self, deployment: str, status: str, restarts: int = 0):
         self.deployment = deployment
         self.status = status
+        self.restarts = restarts
+
+
+class StubHPA:
+    def __init__(self, name: str, min_replicas: int, max_replicas: int, cpu_target_percent: int):
+        self.name = name
+        self.min_replicas = min_replicas
+        self.max_replicas = max_replicas
+        self.cpu_target_percent = cpu_target_percent
 
 
 class StubWorld:
-    def __init__(self, pods):
+    def __init__(self, pods, hpas=None):
         self._pods = pods
+        self._hpas = hpas or []
 
     def get_pods(self):
         return self._pods
+
+    def get_hpas(self):
+        return self._hpas
 
 
 def test_get_objective_for_task_known_and_unknown():
@@ -42,6 +55,40 @@ def test_calculate_reward_pod_recovery():
 
     reward = calculate_reward(world, "pod_recovery")
     assert reward == pytest.approx(2 / 3)
+
+
+def test_calculate_reward_autoscaling_rewards_stability_and_hpa_policy():
+    healthy_world = StubWorld(
+        [
+            StubPod("backend", "Running", restarts=0),
+            StubPod("backend", "Running", restarts=0),
+        ],
+        hpas=[StubHPA("backend-hpa", min_replicas=2, max_replicas=6, cpu_target_percent=70)],
+    )
+
+    unstable_world = StubWorld(
+        [
+            StubPod("backend", "Running", restarts=10),
+            StubPod("backend", "Running", restarts=9),
+        ],
+        hpas=[StubHPA("backend-hpa", min_replicas=2, max_replicas=6, cpu_target_percent=70)],
+    )
+
+    no_hpa_world = StubWorld(
+        [
+            StubPod("backend", "Running", restarts=0),
+            StubPod("backend", "Running", restarts=0),
+        ],
+        hpas=[],
+    )
+
+    healthy_reward = calculate_reward(healthy_world, "autoscaling")
+    unstable_reward = calculate_reward(unstable_world, "autoscaling")
+    no_hpa_reward = calculate_reward(no_hpa_world, "autoscaling")
+
+    assert healthy_reward == pytest.approx(1.0)
+    assert unstable_reward < healthy_reward
+    assert no_hpa_reward < healthy_reward
 
 
 def test_check_task_complete_incident_true_and_false():
