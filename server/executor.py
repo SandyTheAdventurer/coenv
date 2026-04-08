@@ -9,6 +9,7 @@ from server.actions import (
     SetHPAAction,
     DrainNodeAction,
     DescribeAction,
+    WaitAction,
 )
 from server.models import ClusterObservation
 
@@ -35,6 +36,8 @@ def execute(action: KubeAction, world) -> ExecutionResult:
         return _execute_drain_node(action, world)
     elif isinstance(action, DescribeAction):
         return _execute_describe(action, world)
+    elif isinstance(action, WaitAction):
+        return _execute_wait(world)
     else:
         raise ValueError(f"Unknown action type: {type(action)}")
 
@@ -112,4 +115,13 @@ def _execute_describe(action: DescribeAction, world) -> ExecutionResult:
         action_applied=f"Described {action.resource_type} '{action.name}'",
         tick_advanced=False,
         describe_detail=detail
+    )
+
+
+def _execute_wait(world) -> ExecutionResult:
+    world.tick()
+    return ExecutionResult(
+        observation=world.get_observation(),
+        action_applied="Waited one simulation tick",
+        tick_advanced=True,
     )

@@ -8,6 +8,7 @@ from server.actions import (
     SetHPAAction,
     DrainNodeAction,
     DescribeAction,
+    WaitAction,
 )
 from server.executor import execute
 from server.models import ClusterObservation
@@ -172,3 +173,14 @@ class TestExecutorDescribe:
 
         assert result.describe_detail is not None
         assert result.describe_detail["type"] == "deployment"
+
+
+class TestExecutorWait:
+    def test_wait_ticks_without_other_world_mutations(self):
+        mock_world = MockWorld()
+        action = WaitAction(action_type="wait")
+        result = execute(action, mock_world)
+
+        assert mock_world.tick_called is True
+        assert result.tick_advanced is True
+        assert result.action_applied == "Waited one simulation tick"

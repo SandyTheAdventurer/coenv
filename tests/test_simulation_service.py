@@ -92,6 +92,9 @@ def test_environment_step_scale_and_describe_paths():
     assert "described" in describe_obs.metadata
     assert "describe_detail" in describe_obs.metadata
 
+    wait_obs = env.step(CoenvAction(action_type="wait"))
+    assert wait_obs.metadata.get("waited") is True
+
 
 def test_environment_step_exception_is_captured_in_metadata(monkeypatch):
     env = CoenvEnvironment()

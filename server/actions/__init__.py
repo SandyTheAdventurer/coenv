@@ -5,6 +5,7 @@ from .rollout_action import RolloutRestartAction
 from .hpa_action import SetHPAAction
 from .drain_action import DrainNodeAction
 from .describe_action import DescribeAction
+from .wait_action import WaitAction
 from typing import Union, Any, Dict, Literal
 
 KubeAction = Union[
@@ -14,10 +15,11 @@ KubeAction = Union[
     RolloutRestartAction,
     SetHPAAction,
     DrainNodeAction,
-    DescribeAction
+    DescribeAction,
+    WaitAction,
 ]
 
-ActionType = Literal["scale", "patch", "delete_pod", "rollout_restart", "set_hpa", "drain_node", "describe"]
+ActionType = Literal["scale", "patch", "delete_pod", "rollout_restart", "set_hpa", "drain_node", "describe", "wait"]
 
 
 def parse_action(data: Dict[str, Any]) -> KubeAction:
@@ -36,6 +38,7 @@ def parse_action(data: Dict[str, Any]) -> KubeAction:
         "set_hpa": SetHPAAction,
         "drain_node": DrainNodeAction,
         "describe": DescribeAction,
+        "wait": WaitAction,
     }
     
     action_class = action_map.get(action_type)
@@ -53,6 +56,7 @@ __all__ = [
     "SetHPAAction",
     "DrainNodeAction",
     "DescribeAction",
+    "WaitAction",
     "KubeAction",
     "parse_action",
 ]

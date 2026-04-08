@@ -8,6 +8,7 @@ from server.actions import (
     SetHPAAction,
     DrainNodeAction,
     DescribeAction,
+    WaitAction,
     parse_action,
 )
 
@@ -201,6 +202,11 @@ class TestParseAction:
         action = parse_action(raw)
         assert isinstance(action, DescribeAction)
         assert action.name == "frontend"
+
+    def test_parse_wait_action(self):
+        raw = {"action_type": "wait"}
+        action = parse_action(raw)
+        assert isinstance(action, WaitAction)
 
     def test_parse_unknown_action_type(self):
         with pytest.raises(ValueError, match="Unknown action_type"):

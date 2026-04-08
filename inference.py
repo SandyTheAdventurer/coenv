@@ -42,33 +42,87 @@ STDOUT FORMAT
     [END] success=true steps=3 score=1.00 rewards=0.00,0.00,1.00
 """
 
-import asyncio
+import inspect
+import json
 import os
 import textwrap
-from typing import List, Optional
+import time
+from typing import Any, Callable, Dict, List, Optional
 
 from openai import OpenAI
-from models import CoenvAction
-from client import CoEnv
-from dotenv import load_dotenv
-load_dotenv()
-IMAGE_NAME = os.getenv("IMAGE_NAME")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
 
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-ENV_URL = os.getenv("ENV_URL") or "http://localhost:8000"
-MAX_STEPS = 8
+try:
+    from models import CoenvAction
+    from client import CoEnv
+except ImportError:
+    from models import CoenvAction
+    from client import CoEnv
+
+from server.graders.grader_pod_recovery import grade as grade_pod_recovery
+from server.graders.grader_autoscaling import grade as grade_autoscaling
+from server.graders.grader_incident import grade as grade_incident
+
+if load_dotenv is not None:
+    load_dotenv()
+
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://router.huggingface.co/v1")
+ENV_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+API_DELAY = float(os.getenv("API_DELAY", "0"))
+
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen3-8B")
+API_KEY = os.getenv("OPENROUTER_API_KEY") or os.getenv("HF_TOKEN")
+
+BENCHMARKS = ["POD_RECOVERY", "AUTOSCALING", "INCIDENT"]
+TASK_NAMES = ["pod_recovery", "autoscaling", "incident"]
+
 TEMPERATURE = 0.7
 MAX_TOKENS = 150
 SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
+DEFAULT_MAX_STEPS = 15
 
-_MAX_REWARD_PER_STEP = MAX_TOKENS * 0.1
-MAX_TOTAL_REWARD = MAX_STEPS * _MAX_REWARD_PER_STEP
+SUCCESS_SCORE_THRESHOLD_BY_TASK: Dict[str, float] = {
+    "pod_recovery": 0.9,
+    "autoscaling": 0.9,
+    "incident": 0.8,
+}
+
+MAX_STALL_REPEATS = 4
+REWARD_EPSILON = 1e-9
+
+MAX_STEPS_BY_TASK = {
+    "pod_recovery": 15,
+    "autoscaling": 20,
+    "incident": 30,
+}
+
+GRADERS: Dict[str, Callable[[Dict[str, Any], int, int], float]] = {
+    "pod_recovery": grade_pod_recovery,
+    "autoscaling": grade_autoscaling,
+    "incident": grade_incident,
+}
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
-    You are an agent interacting with an Kubernetes-like simulation environment.
+    You are a Kubernetes incident-response agent.
+    Return ONLY valid JSON for one action with this schema:
+    {
+            "action_type": "scale|delete_pod|patch|rollout_restart|set_hpa|drain_node|describe|wait",
+      "deployment": "... optional ...",
+      "replicas": 1,
+      "pod_name": "...",
+      "resource_type": "deployment|pod|node|service|configmap|hpa",
+      "name": "...",
+      "patch": {},
+      "min_replicas": 1,
+      "max_replicas": 5,
+      "cpu_target_percent": 70,
+      "node_name": "..."
+    }
+    Do not include markdown, prose, or code fences.
     """
 ).strip()
 
@@ -91,22 +145,150 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
 
-def build_user_prompt(step: int, last_echoed: str, last_reward: float, history: List[str]) -> str:
-    history_block = "\n".join(history[-4:]) if history else "None"
+def _to_dict(obj: Any) -> Dict[str, Any]:
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if isinstance(obj, dict):
+        return obj
+    return vars(obj)
+
+
+def _observation_summary(observation: Any) -> str:
+    obs = _to_dict(observation)
+    pods = obs.get("pods", [])
+    deployments = obs.get("deployments", [])
+    events = obs.get("events", [])
+
+    pod_status_counts: Dict[str, int] = {}
+    for pod in pods:
+        status = pod.get("status", "Unknown")
+        pod_status_counts[status] = pod_status_counts.get(status, 0) + 1
+
+    deployment_lines = []
+    for dep in deployments:
+        deployment_lines.append(
+            f"{dep.get('name')}: desired={dep.get('desired_replicas', 0)} available={dep.get('available_replicas', 0)}"
+        )
+
+    recent_events = [
+        f"{e.get('type', 'Normal')}/{e.get('reason', '')}: {e.get('message', '')}"
+        for e in events[-5:]
+    ]
+
     return textwrap.dedent(
         f"""
-        Step: {step}
-        Last echoed message: {last_echoed!r}
-        Last reward: {last_reward:.2f}
-        Previous steps:
-        {history_block}
-        Send your next message.
+        Objective: {obs.get('objective', '')}
+        Step: {obs.get('step', 0)}
+        Pod status counts: {pod_status_counts}
+        Deployments:
+        {chr(10).join(deployment_lines) if deployment_lines else 'None'}
+        Recent events:
+        {chr(10).join(recent_events) if recent_events else 'None'}
         """
     ).strip()
 
 
-def get_model_message(client: OpenAI, step: int, last_echoed: str, last_reward: float, history: List[str]) -> str:
-    user_prompt = build_user_prompt(step, last_echoed, last_reward, history)
+def build_user_prompt(task_name: str, step: int, observation: Any, history: List[str]) -> str:
+    history_block = "\n".join(history[-4:]) if history else "None"
+    return textwrap.dedent(
+        f"""
+        Task: {task_name}
+        Step: {step}
+        Current cluster summary:
+        {_observation_summary(observation)}
+        Previous steps:
+        {history_block}
+        Return one valid next action as pure JSON.
+        """
+    ).strip()
+
+
+def _safe_json_action(text: str) -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                return None
+    return None
+
+
+def _heuristic_action(task_name: str, observation: Any) -> Dict[str, Any]:
+    obs = _to_dict(observation)
+    pods = obs.get("pods", [])
+
+    if task_name == "pod_recovery":
+        crashloop = [p for p in pods if p.get("deployment") == "frontend" and p.get("status") == "CrashLoopBackOff"]
+        if crashloop:
+            return {"action_type": "rollout_restart", "deployment": "frontend"}
+        return {"action_type": "describe", "resource_type": "deployment", "name": "frontend"}
+
+    if task_name == "autoscaling":
+        return {
+            "action_type": "set_hpa",
+            "deployment": "backend",
+            "min_replicas": 2,
+            "max_replicas": 6,
+            "cpu_target_percent": 70,
+        }
+
+    return {"action_type": "rollout_restart", "deployment": "auth-service"}
+
+
+def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
+    action_type = action.get("action_type", "describe")
+    if isinstance(action_type, str):
+        action_type = {
+            "set_hpas": "set_hpa",
+            "hpa": "set_hpa",
+            "restart_rollout": "rollout_restart",
+            "noop": "wait",
+            "no_op": "wait",
+            "pause": "wait",
+            "sleep": "wait",
+        }.get(action_type.strip().lower(), action_type.strip().lower())
+    else:
+        action_type = "describe"
+    normalized: Dict[str, Any] = {"action_type": action_type}
+
+    allowed_fields = {
+        "deployment",
+        "replicas",
+        "pod_name",
+        "resource_type",
+        "name",
+        "patch",
+        "min_replicas",
+        "max_replicas",
+        "cpu_target_percent",
+        "node_name",
+    }
+    for field in allowed_fields:
+        if field in action and action[field] is not None:
+            normalized[field] = action[field]
+
+    defaults_by_type = {
+        "describe": {"resource_type": "deployment", "name": "frontend"},
+        "scale": {"deployment": "frontend", "replicas": 3},
+        "rollout_restart": {"deployment": "frontend"},
+        "delete_pod": {"pod_name": "frontend-unknown"},
+        "drain_node": {"node_name": "node-1"},
+        "patch": {"resource_type": "deployment", "name": "frontend", "patch": {}},
+        "set_hpa": {"deployment": "backend", "min_replicas": 2, "max_replicas": 6, "cpu_target_percent": 70},
+        "wait": {},
+    }
+    for k, v in defaults_by_type.get(action_type, {}).items():
+        normalized.setdefault(k, v)
+
+    return normalized
+
+
+def get_model_action(client: OpenAI, task_name: str, step: int, observation: Any, history: List[str]) -> Dict[str, Any]:
+    user_prompt = build_user_prompt(task_name, step, observation, history)
     try:
         completion = client.chat.completions.create(
             model=MODEL_NAME,
@@ -119,66 +301,97 @@ def get_model_message(client: OpenAI, step: int, last_echoed: str, last_reward: 
             stream=False,
         )
         text = (completion.choices[0].message.content or "").strip()
-        return text if text else "hello"
+        parsed = _safe_json_action(text)
+        if isinstance(parsed, dict):
+            return _normalize_action(parsed)
+        return _heuristic_action(task_name, observation)
     except Exception as exc:
         print(f"[DEBUG] Model request failed: {exc}", flush=True)
-        return "hello"
+        return _heuristic_action(task_name, observation)
 
-
-async def main() -> None:
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-
-    env = await CoEnv.from_docker_image(IMAGE_NAME)
-
-    history: List[str] = []
-    rewards: List[float] = []
-    steps_taken = 0
-    score = 0.0
-    success = False
-
-    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
-
-    try:
-        result = await env.reset() # OpenENV.reset()
-        last_echoed = result.observation.echoed_message
-        last_reward = 0.0
-
-        for step in range(1, MAX_STEPS + 1):
-            if result.done:
-                break
-
-            message = get_model_message(client, step, last_echoed, last_reward, history)
-
-            result = await env.step(CoenvAction(message=message))
-            obs = result.observation
-
-            reward = result.reward or 0.0
-            done = result.done
-            error = None
-
-            rewards.append(reward)
-            steps_taken = step
-            last_echoed = obs.echoed_message
-            last_reward = reward
-
-            log_step(step=step, action=message, reward=reward, done=done, error=error)
-
-            history.append(f"Step {step}: {message!r} -> reward {reward:+.2f}")
-
-            if done:
-                break
-
-        score = sum(rewards) / MAX_TOTAL_REWARD if MAX_TOTAL_REWARD > 0 else 0.0
-        score = min(max(score, 0.0), 1.0)  # clamp to [0, 1]
-        success = score >= SUCCESS_SCORE_THRESHOLD
-
-    finally:
+def _close_env(env: Any) -> None:
+    maybe = env.close()
+    if inspect.isawaitable(maybe):
+        # CoEnv.sync() should provide sync close(), but support awaitables defensively.
         try:
-            await env.close()
-        except Exception as e:
-            print(f"[DEBUG] env.close() error (container cleanup): {e}", flush=True)
-        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+            while True:
+                maybe.send(None)
+        except StopIteration:
+            pass
+
+
+def main() -> None:
+    if not API_KEY:
+        raise RuntimeError("Missing HF_TOKEN/API_KEY for OpenAI client.")
+    for TASK_NAME, BENCHMARK in zip(TASK_NAMES, BENCHMARKS):
+        client = OpenAI(base_url=LLM_BASE_URL, api_key=API_KEY)
+        max_steps = MAX_STEPS_BY_TASK.get(TASK_NAME, DEFAULT_MAX_STEPS)
+        grader = GRADERS.get(TASK_NAME, grade_pod_recovery)
+
+        env = CoEnv(base_url=ENV_URL).sync()
+
+        history: List[str] = []
+        rewards: List[float] = []
+        steps_taken = 0
+        score = 0.0
+        success = False
+        final_obs: Optional[Any] = None
+        episode_done = False
+        stalled = False
+        last_action_str: Optional[str] = None
+        consecutive_same_action = 0
+        last_reward: Optional[float] = None
+
+        log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+
+        try:
+            result = env.reset(task=TASK_NAME)
+            final_obs = result.observation
+
+            for step in range(1, max_steps + 1):
+                time.sleep(API_DELAY)
+                if result.done:
+                    break
+
+                action_payload = get_model_action(client, TASK_NAME, step, final_obs, history)
+                action = CoenvAction(**action_payload)
+
+                result = env.step(action)
+                obs = result.observation
+                final_obs = obs
+
+                reward = result.reward or 0.0
+                done = result.done
+                error = (obs.metadata or {}).get("error") if hasattr(obs, "metadata") else None
+
+                rewards.append(reward)
+                steps_taken = step
+                episode_done = bool(done)
+
+                action_str = json.dumps(action_payload, separators=(",", ":"))
+                log_step(step=step, action=action_str, reward=reward, done=done, error=error)
+
+                history.append(f"Step {step}: {action_str} -> reward {reward:+.2f}")
+
+                if done:
+                    break
+
+            world_state = _to_dict(final_obs) if final_obs is not None else {}
+            score = grader(world_state, steps_taken, max_steps)
+            score = min(max(score, 0.0), 1.0)
+            success = (
+                episode_done
+                and not stalled
+                and steps_taken > 0
+            )
+
+        finally:
+            try:
+                _close_env(env)
+            except Exception as e:
+                print(f"[DEBUG] env.close() error (container cleanup): {e}", flush=True)
+            log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

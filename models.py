@@ -48,6 +48,7 @@ class CoenvAction(Action):
         "set_hpa",
         "drain_node",
         "describe",
+        "wait",
     ] = Field(..., description="Type of action to execute")
 
     deployment: Optional[str] = Field(default=None)
