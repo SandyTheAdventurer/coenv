@@ -66,7 +66,7 @@ asyncio.run(main())
 ## Building the Docker Image
 
 ```bash
-docker build -t coenv-env:latest -f server/Dockerfile .
+docker build -t coenv-env:latest -f Dockerfile .
 ```
 
 ## Deploying to Hugging Face Spaces
@@ -169,9 +169,9 @@ coenv/
 │   ├── conditions/         # Failure condition injectors (crash_loop, oom_kill, etc.)
 │   ├── graders/           # Task grading functions
 │   ├── tasks/              # Task definitions (pod_recovery, autoscaling, incident)
-│   ├── Dockerfile          # Docker container build
 │   └── requirements.txt    # Server dependencies
 ├── tests/                   # Unit tests
+├── Dockerfile               # Docker container build
 ├── models.py                # Public action/observation models
 ├── client.py                # Python client
 ├── inference.py             # Example inference script
