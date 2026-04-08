@@ -3,3 +3,5 @@ uvicorn
 pydantic
 numpy
 openenv-core
+pymdown-extensions
+mkdocs

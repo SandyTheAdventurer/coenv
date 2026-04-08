@@ -17,6 +17,8 @@ tags:
 
 A Kubernetes cluster simulation environment for OpenEnv. Provides a testbed for building and evaluating LLM agents that manage Kubernetes clusters through realistic scenarios.
 
+Documentation: https://sandytheadventurer.github.io/coenv/
+
 ## Features
 
 - **Simulated Kubernetes Cluster**: Full cluster simulation including nodes, pods, deployments, services, ConfigMaps, and HPAs
