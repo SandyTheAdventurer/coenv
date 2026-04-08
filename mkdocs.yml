@@ -3,7 +3,7 @@ site_description: Kubernetes cluster simulation environment for OpenEnv
 site_url: https://github.com/SandyTheAdventurer/coenv
 
 theme:
-  name: material
+  name: mkdocs
   palette:
     - scheme: default
       primary: indigo
