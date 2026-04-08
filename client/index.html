@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        
+        <link rel="canonical" href="https://github.com/SandyTheAdventurer/coenv/client/">
+        <link rel="shortcut icon" href="../img/favicon.ico">
+        <title>Client - coenv</title>
+        <link href="../css/bootstrap.min.css" rel="stylesheet">
+        <link href="../css/fontawesome.min.css" rel="stylesheet">
+        <link href="../css/brands.min.css" rel="stylesheet">
+        <link href="../css/solid.min.css" rel="stylesheet">
+        <link href="../css/v4-font-face.min.css" rel="stylesheet">
+        <link href="../css/base.css" rel="stylesheet">
+        <link id="hljs-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" >
+        <link id="hljs-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" disabled>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+        <script>hljs.highlightAll();</script> 
+    </head>
+
+    <body>
+        <div class="navbar fixed-top navbar-expand-lg navbar-dark bg-primary">
+            <div class="container">
+                <a class="navbar-brand" href="..">coenv</a>
+                <!-- Expander button -->
+                <button type="button" class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbar-collapse" aria-controls="navbar-collapse" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+
+                <!-- Expanded navigation -->
+                <div id="navbar-collapse" class="navbar-collapse collapse">
+                        <!-- Main navigation -->
+                        <ul class="nav navbar-nav">
+                            <li class="nav-item">
+                                <a href=".." class="nav-link">Home</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../getting-started/" class="nav-link">Getting Started</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../actions/" class="nav-link">Actions</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../models/" class="nav-link">Models</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../server/" class="nav-link">Server</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="./" class="nav-link active" aria-current="page">Client</a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="../deployment/" class="nav-link">Deployment</a>
+                            </li>
+                        </ul>
+
+                    <ul class="nav navbar-nav ms-md-auto">
+                        <li class="nav-item">
+                            <a href="#" class="nav-link" data-bs-toggle="modal" data-bs-target="#mkdocs_search_modal">
+                                <i class="fa fa-search"></i> Search
+                            </a>
+                        </li>
+                            <li class="nav-item">
+                                <a rel="prev" href="../server/" class="nav-link">
+                                    <i class="fa fa-arrow-left"></i> Previous
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a rel="next" href="../deployment/" class="nav-link">
+                                    Next <i class="fa fa-arrow-right"></i>
+                                </a>
+                            </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <div class="row">
+                    <div class="col-md-3"><div class="navbar-expand-md bs-sidebar hidden-print affix" role="complementary">
+    <div class="navbar-header">
+        <button type="button" class="navbar-toggler collapsed" data-bs-toggle="collapse" data-bs-target="#toc-collapse" title="Table of Contents">
+            <span class="fa fa-angle-down"></span>
+        </button>
+    </div>
+
+    
+    <div id="toc-collapse" class="navbar-collapse collapse card bg-body-tertiary">
+        <ul class="nav flex-column">
+            
+            <li class="nav-item" data-bs-level="1"><a href="#client" class="nav-link">Client</a>
+              <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#installation" class="nav-link">Installation</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#basic-usage" class="nav-link">Basic Usage</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#available-tasks" class="nav-link">Available Tasks</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#coenv-class" class="nav-link">CoEnv Class</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#websocket-connections" class="nav-link">WebSocket Connections</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#complete-example" class="nav-link">Complete Example</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+            <li class="nav-item" data-bs-level="2"><a href="#model-exports" class="nav-link">Model Exports</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
+              </ul>
+            </li>
+        </ul>
+    </div>
+</div></div>
+                    <div class="col-md-9" role="main">
+
+<h1 id="client">Client<a class="headerlink" href="#client" title="Permanent link">&para;</a></h1>
+<p>The coenv client provides a Python interface to connect to the COEnv server via WebSocket.</p>
+<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
+<p>The client is included with the package:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync
+</code></pre></div>
+<h2 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">&para;</a></h2>
+<h3 id="connect-to-running-server">Connect to Running Server<a class="headerlink" href="#connect-to-running-server" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">models</span><span class="w"> </span><span class="kn">import</span> <span class="n">CoenvAction</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">client</span><span class="w"> </span><span class="kn">import</span> <span class="n">CoEnv</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">CoEnv</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8000&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="c1"># Reset with a specific task</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;pod_recovery&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Objective: </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">observation</span><span class="o">.</span><span class="n">objective</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Step: </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">observation</span><span class="o">.</span><span class="n">step</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Execute an action</span>
+        <span class="n">action</span> <span class="o">=</span> <span class="n">CoenvAction</span><span class="p">(</span>
+            <span class="n">action_type</span><span class="o">=</span><span class="s2">&quot;rollout_restart&quot;</span><span class="p">,</span>
+            <span class="n">deployment</span><span class="o">=</span><span class="s2">&quot;frontend&quot;</span>
+        <span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>
+
+        <span class="c1"># Check metadata for action details</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">observation</span><span class="o">.</span><span class="n">metadata</span><span class="p">)</span>
+
+<span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</code></pre></div>
+<h3 id="using-context-manager">Using Context Manager<a class="headerlink" href="#using-context-manager" title="Permanent link">&para;</a></h3>
+<p>The client automatically handles connection lifecycle:</p>
+<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">with</span> <span class="n">CoEnv</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8000&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;autoscaling&quot;</span><span class="p">)</span>
+    <span class="c1"># ... use client ...</span>
+<span class="c1"># Connection automatically closed</span>
+</code></pre></div>
+<h2 id="available-tasks">Available Tasks<a class="headerlink" href="#available-tasks" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pod_recovery</code></td>
+<td>Fix crash-looping frontend pods</td>
+</tr>
+<tr>
+<td><code>autoscaling</code></td>
+<td>Configure HPA for traffic spike</td>
+</tr>
+<tr>
+<td><code>incident</code></td>
+<td>Restore cascading failure</td>
+</tr>
+</tbody>
+</table>
+<h2 id="coenv-class">CoEnv Class<a class="headerlink" href="#coenv-class" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">CoEnv</span><span class="p">(</span><span class="n">EnvClient</span><span class="p">[</span><span class="n">CoenvAction</span><span class="p">,</span> <span class="n">CoenvObservation</span><span class="p">,</span> <span class="n">State</span><span class="p">]):</span>
+</code></pre></div>
+<h3 id="methods">Methods<a class="headerlink" href="#methods" title="Permanent link">&para;</a></h3>
+<h4 id="resettask-str-pod_recovery-stepresultcoenvobservation"><code>reset(task: str = "pod_recovery") -&gt; StepResult[CoenvObservation]</code><a class="headerlink" href="#resettask-str-pod_recovery-stepresultcoenvobservation" title="Permanent link">&para;</a></h4>
+<p>Reset the environment and return initial observation.</p>
+<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;pod_recovery&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h4 id="stepaction-coenvaction-stepresultcoenvobservation"><code>step(action: CoenvAction) -&gt; StepResult[CoenvObservation]</code><a class="headerlink" href="#stepaction-coenvaction-stepresultcoenvobservation" title="Permanent link">&para;</a></h4>
+<p>Execute an action and return the result.</p>
+<div class="highlight"><pre><span></span><code><span class="n">action</span> <span class="o">=</span> <span class="n">CoenvAction</span><span class="p">(</span>
+    <span class="n">action_type</span><span class="o">=</span><span class="s2">&quot;scale&quot;</span><span class="p">,</span>
+    <span class="n">deployment</span><span class="o">=</span><span class="s2">&quot;frontend&quot;</span><span class="p">,</span>
+    <span class="n">replicas</span><span class="o">=</span><span class="mi">5</span>
+<span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>
+</code></pre></div>
+<h4 id="state-coenvstate"><code>state -&gt; CoenvState</code><a class="headerlink" href="#state-coenvstate" title="Permanent link">&para;</a></h4>
+<p>Get current environment state (episode_id, step_count).</p>
+<div class="highlight"><pre><span></span><code><span class="n">state</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">state</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Episode: </span><span class="si">{</span><span class="n">state</span><span class="o">.</span><span class="n">episode_id</span><span class="si">}</span><span class="s2">, Step: </span><span class="si">{</span><span class="n">state</span><span class="o">.</span><span class="n">step_count</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="stepresult-fields">StepResult Fields<a class="headerlink" href="#stepresult-fields" title="Permanent link">&para;</a></h3>
+<p>The <code>StepResult</code> contains:</p>
+<ul>
+<li><code>observation</code> (<code>CoenvObservation</code>): Current cluster state</li>
+<li><code>reward</code> (<code>float</code>): Computed reward for the action</li>
+<li><code>done</code> (<code>bool</code>): Whether the task is complete</li>
+</ul>
+<h3 id="observation-metadata">Observation Metadata<a class="headerlink" href="#observation-metadata" title="Permanent link">&para;</a></h3>
+<p>The observation includes metadata with action results:</p>
+<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>
+<span class="n">metadata</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">observation</span><span class="o">.</span><span class="n">metadata</span>
+
+<span class="c1"># Possible metadata keys:</span>
+<span class="c1"># - scaled: deployment name if scale action</span>
+<span class="c1"># - replicas: new replica count</span>
+<span class="c1"># - deleted: pod name if delete_pod action</span>
+<span class="c1"># - patched: resource if patch action</span>
+<span class="c1"># - restarted: deployment name if rollout_restart</span>
+<span class="c1"># - drained: node name if drain_node</span>
+<span class="c1"># - hpa_set: deployment name if set_hpa</span>
+<span class="c1"># - described: resource if describe action</span>
+<span class="c1"># - describe_detail: detailed info from describe</span>
+<span class="c1"># - error: error message if action failed</span>
+<span class="c1"># - truncated: True if max steps reached</span>
+</code></pre></div>
+<h2 id="websocket-connections">WebSocket Connections<a class="headerlink" href="#websocket-connections" title="Permanent link">&para;</a></h2>
+<p>The client uses WebSocket for:
+- Lower latency (no HTTP overhead per request)
+- Persistent sessions (environment state maintained)
+- Efficient for multi-step episodes</p>
+<h2 id="complete-example">Complete Example<a class="headerlink" href="#complete-example" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">models</span><span class="w"> </span><span class="kn">import</span> <span class="n">CoenvAction</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">client</span><span class="w"> </span><span class="kn">import</span> <span class="n">CoEnv</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run_episode</span><span class="p">():</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">CoEnv</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8000&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="c1"># Reset for pod_recovery task</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;pod_recovery&quot;</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">16</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">done</span><span class="p">:</span>
+                <span class="k">break</span>
+
+            <span class="c1"># Example: try rollout restart</span>
+            <span class="n">action</span> <span class="o">=</span> <span class="n">CoenvAction</span><span class="p">(</span>
+                <span class="n">action_type</span><span class="o">=</span><span class="s2">&quot;rollout_restart&quot;</span><span class="p">,</span>
+                <span class="n">deployment</span><span class="o">=</span><span class="s2">&quot;frontend&quot;</span>
+            <span class="p">)</span>
+
+            <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Step </span><span class="si">{</span><span class="n">step</span><span class="si">}</span><span class="s2">: reward=</span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">reward</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">, done=</span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">done</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">observation</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;error&quot;</span><span class="p">):</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error: </span><span class="si">{</span><span class="n">result</span><span class="o">.</span><span class="n">observation</span><span class="o">.</span><span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;error&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">run_episode</span><span class="p">())</span>
+</code></pre></div>
+<h2 id="model-exports">Model Exports<a class="headerlink" href="#model-exports" title="Permanent link">&para;</a></h2>
+<p>Import models from the package root:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">models</span><span class="w"> </span><span class="kn">import</span> <span class="n">CoenvAction</span><span class="p">,</span> <span class="n">CoenvObservation</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">client</span><span class="w"> </span><span class="kn">import</span> <span class="n">CoEnv</span>
+</code></pre></div></div>
+            </div>
+        </div>
+
+        <footer class="col-md-12">
+            <hr>
+            <p>Documentation built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+        </footer>
+        <script src="../js/bootstrap.bundle.min.js"></script>
+        <script>
+            var base_url = "..",
+                shortcuts = {"help": 191, "next": 78, "previous": 80, "search": 83};
+        </script>
+        <script src="../js/base.js"></script>
+        <script src="../search/main.js"></script>
+
+        <div class="modal" id="mkdocs_search_modal" tabindex="-1" role="dialog" aria-labelledby="searchModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="searchModalLabel">Search</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>From here you can search these documents. Enter your search terms below.</p>
+                <form>
+                    <div class="form-group">
+                        <input type="search" class="form-control" placeholder="Search..." id="mkdocs-search-query" title="Type search term here">
+                    </div>
+                </form>
+                <div id="mkdocs-search-results" data-no-results-text="No results found"></div>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div><div class="modal" id="mkdocs_keyboard_modal" tabindex="-1" role="dialog" aria-labelledby="keyboardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="keyboardModalLabel">Keyboard Shortcuts</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">Keys</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="help shortcut"><kbd>?</kbd></td>
+                    <td>Open this help</td>
+                  </tr>
+                  <tr>
+                    <td class="next shortcut"><kbd>n</kbd></td>
+                    <td>Next page</td>
+                  </tr>
+                  <tr>
+                    <td class="prev shortcut"><kbd>p</kbd></td>
+                    <td>Previous page</td>
+                  </tr>
+                  <tr>
+                    <td class="search shortcut"><kbd>s</kbd></td>
+                    <td>Search</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-footer">
+            </div>
+        </div>
+    </div>
+</div>
+
+    </body>
+</html>

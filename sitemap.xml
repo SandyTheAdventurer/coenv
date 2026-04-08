@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://github.com/SandyTheAdventurer/coenv/</loc>
+         <lastmod>2026-04-08</lastmod>
+    </url>
+    <url>
+         <loc>https://github.com/SandyTheAdventurer/coenv/actions/</loc>
+         <lastmod>2026-04-08</lastmod>
+    </url>
+    <url>
+         <loc>https://github.com/SandyTheAdventurer/coenv/client/</loc>
+         <lastmod>2026-04-08</lastmod>
+    </url>
+    <url>
+         <loc>https://github.com/SandyTheAdventurer/coenv/deployment/</loc>
+         <lastmod>2026-04-08</lastmod>
+    </url>
+    <url>
+         <loc>https://github.com/SandyTheAdventurer/coenv/getting-started/</loc>
+         <lastmod>2026-04-08</lastmod>
+    </url>
+    <url>
+         <loc>https://github.com/SandyTheAdventurer/coenv/models/</loc>
+         <lastmod>2026-04-08</lastmod>
+    </url>
+    <url>
+         <loc>https://github.com/SandyTheAdventurer/coenv/server/</loc>
+         <lastmod>2026-04-08</lastmod>
+    </url>
+</urlset>
