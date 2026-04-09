@@ -85,10 +85,9 @@ uv run python inference.py
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `API_BASE_URL` | Server URL | `http://localhost:8000` |
-| `LLM_BASE_URL` | LLM API endpoint | `https://router.huggingface.co/v1` |
+| `API_BASE_URL` | Server URL | `https://router.huggingface.co/v1` |
 | `MODEL_NAME` | Model identifier | `Qwen/Qwen3-8B` |
-| `HF_TOKEN` / `OPENROUTER_API_KEY` | API key | Required |
+| `HF_TOKEN` | API key | Required |
 
 ## Next Steps
 
