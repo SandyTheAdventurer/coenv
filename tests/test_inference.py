@@ -1,4 +1,12 @@
-from inference import _normalize_action, _safe_json_action, _task_fallback_action
+import pytest
+
+from inference import (
+    _clamp_open_unit_interval,
+    _normalize_action,
+    _safe_json_action,
+    _task_fallback_action,
+    log_end,
+)
 
 
 def test_normalize_action_maps_set_hpas_to_set_hpa():
@@ -98,3 +106,16 @@ def test_task_fallback_action_pod_recovery_describes_crashloop_pod_first():
     assert action["action_type"] == "describe"
     assert action["resource_type"] == "pod"
     assert action["name"] == "frontend-123"
+
+
+def test_clamp_open_unit_interval_is_strictly_inside_bounds():
+    assert _clamp_open_unit_interval(0.0) == pytest.approx(0.0001)
+    assert _clamp_open_unit_interval(1.0) == pytest.approx(0.9999)
+    assert _clamp_open_unit_interval(0.42) == pytest.approx(0.42)
+
+
+def test_log_end_emits_non_boundary_score(capsys):
+    log_end(success=True, steps=3, score=1.0, rewards=[0.0, 0.0, 1.0])
+    output = capsys.readouterr().out.strip()
+
+    assert "score=0.9999" in output

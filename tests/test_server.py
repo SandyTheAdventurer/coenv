@@ -5,7 +5,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_client_step_and_state():
-    async with CoEnv(base_url="https://nightreigners-coenv.hf.space/") as client:
+    async with CoEnv(base_url="https://nightreigners-coenv.hf.space") as client:
         # Test reset and initial state
         reset_result = await client.reset()
         assert hasattr(reset_result.observation, "step")
