@@ -33,7 +33,7 @@ STDOUT FORMAT
     - done and success are lowercase booleans: true or false.
     - error is the raw last_action_error string, or null if none.
     - All fields on a single line with no newlines within a line.
-    - Each tasks should return score in [0, 1]
+    - Each task should return score strictly in (0, 1)
 
   Example:
     [START] task=click-test env=miniwob model=Qwen3-VL-30B
@@ -45,6 +45,7 @@ STDOUT FORMAT
 
 import asyncio
 import json
+import math
 import os
 import websockets
 import sys
@@ -100,6 +101,7 @@ SUCCESS_SCORE_THRESHOLD_BY_TASK: Dict[str, float] = {
 MAX_STALL_REPEATS = 4
 REWARD_EPSILON = 1e-9
 MAX_TASK_RETRIES_ON_CONNECTION_CLOSE = 1
+SCORE_EPSILON = 1e-4
 
 MAX_STEPS_BY_TASK = {
     "pod_recovery": 15,
@@ -156,10 +158,24 @@ def log_step(
     )
 
 
+def _clamp_open_unit_interval(value: float, eps: float = SCORE_EPSILON) -> float:
+    """Clamp a score strictly inside (0, 1) with a small safety margin."""
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.5
+
+    if not math.isfinite(numeric):
+        return 0.5
+
+    return min(max(numeric, eps), 1.0 - eps)
+
+
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    score = _clamp_open_unit_interval(score)
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.4f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -615,10 +631,9 @@ async def main() -> None:
                 stalled = True
 
             finally:
-                world_state = _to_dict(final_obs) if final_obs is not None else {}
-                score = grader(world_state, steps_taken, max_steps)
-                score = max(0.0001, min(score, 0.9999))
-                success = episode_done and not stalled and steps_taken > 0
+                score = sum(rewards) / len(rewards) if rewards else 0.0
+                score = _clamp_open_unit_interval(score, eps=1e-6)
+                success = score >= SUCCESS_SCORE_THRESHOLD
 
                 log_end(
                     success=success, steps=steps_taken, score=score, rewards=rewards
