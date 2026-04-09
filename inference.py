@@ -86,7 +86,7 @@ API_DELAY = 4
 BENCHMARKS = ["POD_RECOVERY", "AUTOSCALING", "INCIDENT"]
 TASK_NAMES = ["pod_recovery", "autoscaling", "incident"]
 
-TEMPERATURE = 0.3 
+TEMPERATURE = 0.3
 MAX_TOKENS = 512
 SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 DEFAULT_MAX_STEPS = 15
@@ -139,6 +139,7 @@ SYSTEM_PROMPT = textwrap.dedent(
     YOUR REPLY (JSON only, nothing else):
     """
 ).strip()
+
 
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
@@ -257,7 +258,11 @@ def _safe_json_action(text: str) -> Optional[Dict[str, Any]]:
     try:
         parsed = json.loads(text)
         extracted = _extract_action_dict(parsed)
-        return extracted if extracted is not None else (parsed if isinstance(parsed, dict) else None)
+        return (
+            extracted
+            if extracted is not None
+            else (parsed if isinstance(parsed, dict) else None)
+        )
     except json.JSONDecodeError:
         pass
 
@@ -274,7 +279,11 @@ def _safe_json_action(text: str) -> Optional[Dict[str, Any]]:
             try:
                 parsed = json.loads(match)
                 extracted = _extract_action_dict(parsed)
-                return extracted if extracted is not None else (parsed if isinstance(parsed, dict) else None)
+                return (
+                    extracted
+                    if extracted is not None
+                    else (parsed if isinstance(parsed, dict) else None)
+                )
             except json.JSONDecodeError:
                 continue
 
@@ -284,7 +293,11 @@ def _safe_json_action(text: str) -> Optional[Dict[str, Any]]:
         try:
             parsed = json.loads(text[start : end + 1])
             extracted = _extract_action_dict(parsed)
-            return extracted if extracted is not None else (parsed if isinstance(parsed, dict) else None)
+            return (
+                extracted
+                if extracted is not None
+                else (parsed if isinstance(parsed, dict) else None)
+            )
         except json.JSONDecodeError:
             pass
 
@@ -295,7 +308,11 @@ def _safe_json_action(text: str) -> Optional[Dict[str, Any]]:
             try:
                 parsed = json.loads(line)
                 extracted = _extract_action_dict(parsed)
-                return extracted if extracted is not None else (parsed if isinstance(parsed, dict) else None)
+                return (
+                    extracted
+                    if extracted is not None
+                    else (parsed if isinstance(parsed, dict) else None)
+                )
             except json.JSONDecodeError:
                 continue
 
@@ -415,7 +432,9 @@ def _find_deployment_name(observation: Dict[str, Any], preferred: str) -> Option
     return names[0] if names else None
 
 
-def _task_fallback_action(task_name: str, step: int, observation: Any) -> Dict[str, Any]:
+def _task_fallback_action(
+    task_name: str, step: int, observation: Any
+) -> Dict[str, Any]:
     obs = _to_dict(observation)
     pods = obs.get("pods", [])
 
@@ -449,17 +468,27 @@ def _task_fallback_action(task_name: str, step: int, observation: Any) -> Dict[s
         deployment = _find_deployment_name(obs, "auth-service") or "frontend"
         return {"action_type": "rollout_restart", "deployment": deployment}
 
-    return {"action_type": "describe", "resource_type": "deployment", "name": "frontend"}
+    return {
+        "action_type": "describe",
+        "resource_type": "deployment",
+        "name": "frontend",
+    }
+
 
 def get_model_action(
     client: OpenAI, task_name: str, step: int, observation: Any, history: List[str]
 ) -> Dict[str, Any]:
     user_prompt = build_user_prompt(task_name, step, observation, history)
-    
+
     for attempt in range(5):  # retry once with stronger prompt
         try:
-            prompt = user_prompt if attempt == 0 else (
-                user_prompt + "\n\nCRITICAL: Reply with ONLY a JSON object. No other text whatsoever."
+            prompt = (
+                user_prompt
+                if attempt == 0
+                else (
+                    user_prompt
+                    + "\n\nCRITICAL: Reply with ONLY a JSON object. No other text whatsoever."
+                )
             )
             completion = client.chat.completions.create(
                 model=MODEL_NAME,
@@ -483,9 +512,12 @@ def get_model_action(
     # If both attempts failed, fall back to a useful task-aware action.
     return _normalize_action(_task_fallback_action(task_name, step, observation))
 
+
 async def main() -> None:
     if not API_KEY:
-        raise RuntimeError("Missing API_KEY (or fallback HF_TOKEN/OPENAI_API_KEY) for OpenAI client.")
+        raise RuntimeError(
+            "Missing API_KEY (or fallback HF_TOKEN/OPENAI_API_KEY) for OpenAI client."
+        )
     for TASK_NAME, BENCHMARK in zip(TASK_NAMES, BENCHMARKS):
         retries_left = MAX_TASK_RETRIES_ON_CONNECTION_CLOSE
 
@@ -585,7 +617,7 @@ async def main() -> None:
             finally:
                 world_state = _to_dict(final_obs) if final_obs is not None else {}
                 score = grader(world_state, steps_taken, max_steps)
-                score = min(max(score, 0.0), 1.0)
+                score = max(0.0001, min(score, 0.9999))
                 success = episode_done and not stalled and steps_taken > 0
 
                 log_end(
