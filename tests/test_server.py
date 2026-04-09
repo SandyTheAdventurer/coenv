@@ -2,6 +2,7 @@ from ..client import CoEnv
 from ..models import CoenvAction
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_client_step_and_state():
     async with CoEnv(base_url="https://nightreigners-coenv.hf.space/") as client:
@@ -13,13 +14,15 @@ async def test_client_step_and_state():
         assert reset_result.done is False
 
         # Test step with a sample action
-        action = CoenvAction(action_type="describe", resource_type="pod", name="test-pod")
+        action = CoenvAction(
+            action_type="describe", resource_type="pod", name="test-pod"
+        )
         step_result = await client.step(action)
         assert hasattr(step_result.observation, "step")
         assert step_result.observation.step == 1
 
         # Test state retrieval
-        
+
         step_result = await client.step(action)
 
         state_attr = getattr(client, "state")
