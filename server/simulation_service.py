@@ -449,7 +449,6 @@ class CoenvEnvironment(Environment):
                 condition.inject()
             self._baseline_metrics = _collect_task_metrics(self.world)
 
-        self.world.tick()
         return self._observation(done=False, reward=0.0, info={"task": task})
 
     def step(self, action: CoenvAction, **_: Any) -> CoenvObservation:
