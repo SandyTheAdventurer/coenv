@@ -180,7 +180,7 @@
 </code></pre></div></p>
 <h2 id="docker-deployment">Docker Deployment<a class="headerlink" href="#docker-deployment" title="Permanent link">&para;</a></h2>
 <p>Build the Docker image:
-<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>coenv-env:latest<span class="w"> </span>-f<span class="w"> </span>server/Dockerfile<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>coenv-env:latest<span class="w"> </span>-f<span class="w"> </span>Dockerfile<span class="w"> </span>.
 </code></pre></div></p>
 <p>Run the container:
 <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>-p<span class="w"> </span><span class="m">8000</span>:8000<span class="w"> </span>coenv-env:latest
@@ -205,11 +205,6 @@
 <tr>
 <td><code>API_BASE_URL</code></td>
 <td>Server URL</td>
-<td><code>http://localhost:8000</code></td>
-</tr>
-<tr>
-<td><code>LLM_BASE_URL</code></td>
-<td>LLM API endpoint</td>
 <td><code>https://router.huggingface.co/v1</code></td>
 </tr>
 <tr>
@@ -218,7 +213,7 @@
 <td><code>Qwen/Qwen3-8B</code></td>
 </tr>
 <tr>
-<td><code>HF_TOKEN</code> / <code>OPENROUTER_API_KEY</code></td>
+<td><code>HF_TOKEN</code></td>
 <td>API key</td>
 <td>Required</td>
 </tr>
