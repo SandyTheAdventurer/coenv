@@ -186,8 +186,7 @@ coenv/
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `API_BASE_URL` | Server URL | `http://localhost:8000` |
-| `LLM_BASE_URL` | LLM API endpoint | `https://router.huggingface.co/v1` |
+| `API_BASE_URL` | LLM API Endpoint | `https://router.huggingface.co/v1` |
 | `MODEL_NAME` | Model identifier | `Qwen/Qwen3-8B` |
 | `HF_TOKEN` | API key | Required |
 
