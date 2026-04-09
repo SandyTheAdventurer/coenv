@@ -35,4 +35,4 @@ def grade(world_state: Dict[str, Any], step: int, max_steps: int) -> float:
     else:
         score = quality_score
 
-    return min(score, 1.0)
+    return max(0.0001, min(score, 0.9999))

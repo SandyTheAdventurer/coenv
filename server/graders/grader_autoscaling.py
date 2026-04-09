@@ -15,7 +15,7 @@ def grade(world_state: Dict[str, Any], step: int, max_steps: int) -> float:
         None,
     )
     if not backend_deployment:
-        return 0.0
+        return 0.0001
 
     # Check if we have adequate replicas
     desired = backend_deployment.get("desired_replicas", 0)
@@ -47,4 +47,4 @@ def grade(world_state: Dict[str, Any], step: int, max_steps: int) -> float:
     else:
         score = quality_score
 
-    return min(score, 1.0)
+    return max(0.0001, min(score, 0.9999))
