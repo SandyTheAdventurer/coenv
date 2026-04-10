@@ -52,7 +52,7 @@ import sys
 import textwrap
 from typing import Any, Callable, Dict, List, Optional
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 try:
     from dotenv import load_dotenv
@@ -491,8 +491,8 @@ def _task_fallback_action(
     }
 
 
-def get_model_action(
-    client: OpenAI, task_name: str, step: int, observation: Any, history: List[str]
+async def get_model_action(
+    client: AsyncOpenAI, task_name: str, step: int, observation: Any, history: List[str]
 ) -> Dict[str, Any]:
     user_prompt = build_user_prompt(task_name, step, observation, history)
 
@@ -506,7 +506,7 @@ def get_model_action(
                     + "\n\nCRITICAL: Reply with ONLY a JSON object. No other text whatsoever."
                 )
             )
-            completion = client.chat.completions.create(
+            completion = await client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -534,11 +534,12 @@ async def main() -> None:
         raise RuntimeError(
             "Missing API_KEY (or fallback HF_TOKEN/OPENAI_API_KEY) for OpenAI client."
         )
+    client = AsyncOpenAI(base_url=LLM_BASE_URL, api_key=API_KEY)
+
     for TASK_NAME, BENCHMARK in zip(TASK_NAMES, BENCHMARKS):
         retries_left = MAX_TASK_RETRIES_ON_CONNECTION_CLOSE
 
         while True:
-            client = OpenAI(base_url=LLM_BASE_URL, api_key=API_KEY)
             max_steps = MAX_STEPS_BY_TASK.get(TASK_NAME, DEFAULT_MAX_STEPS)
             grader = GRADERS.get(TASK_NAME, grade_pod_recovery)
 
@@ -572,7 +573,7 @@ async def main() -> None:
                             )
                             break
 
-                        action_payload = get_model_action(
+                        action_payload = await get_model_action(
                             client, TASK_NAME, step, final_obs, history
                         )
                         action = CoenvAction(**action_payload)
@@ -608,9 +609,9 @@ async def main() -> None:
 
                         if done:
                             break
-            except websockets.exceptions.ConnectionClosedError:
+            except websockets.exceptions.ConnectionClosedError as exc:
                 print(
-                    f"Connection closed unexpectedly for task={TASK_NAME}",
+                    f"Connection closed unexpectedly for task={TASK_NAME}: {exc}",
                     file=sys.stderr,
                     flush=True,
                 )
