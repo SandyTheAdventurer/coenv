@@ -71,10 +71,7 @@ if load_dotenv is not None:
 
 ENV_URL = os.getenv("ENV_URL", "https://Nightreigners-COEnv.hf.space")
 
-LLM_BASE_URL = (
-    os.getenv("API_BASE_URL")
-    or "https://router.huggingface.co/v1"
-)
+LLM_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3-8B")
 API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
 DEBUG = os.getenv("DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -85,28 +82,29 @@ TASK_NAMES = ["pod_recovery", "autoscaling", "incident"]
 API_DELAY = 0
 _model_thinks: Optional[bool] = None
 TEMPERATURE = 0.3
-MAX_TOKENS   = 1024
+MAX_TOKENS = 1024
+
 
 def _is_thinking_response(message) -> bool:
     """Check if the response actually contained reasoning/thinking tokens."""
     content = message.content
-    
+
     # Check 1: content is a list of blocks with a reasoning/thinking block
     if isinstance(content, list):
         return any(
-            getattr(block, "type", "") in ("reasoning", "thinking")
-            for block in content
+            getattr(block, "type", "") in ("reasoning", "thinking") for block in content
         )
-    
+
     # Check 2: some providers expose reasoning separately
     if getattr(message, "reasoning_content", None):
         return True
-    
+
     # Check 3: raw <think> tags in string content (HF/Qwen style)
     if isinstance(content, str) and "<think>" in content:
         return True
-    
+
     return False
+
 
 SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 DEFAULT_MAX_STEPS = 15
@@ -114,7 +112,7 @@ DEFAULT_MAX_STEPS = 15
 SUCCESS_SCORE_THRESHOLD_BY_TASK: Dict[str, float] = {
     "pod_recovery": 0.9,
     "autoscaling": 0.9,
-    "incident": 0.8,
+    "security": 0.8,
 }
 
 MAX_STALL_REPEATS = 4
@@ -125,8 +123,12 @@ SCORE_EPSILON = 1e-4
 MAX_STEPS_BY_TASK = {
     "pod_recovery": 15,
     "autoscaling": 20,
-    "incident": 20,
+    "security": 20,
 }
+
+SENSITIVE_KEYS = {"API_KEY", "DB_PASSWORD", "JWT_SECRET", "SECRET", "PASSWORD"}
+SENSITIVE_KEY_HINTS = ("SECRET", "PASSWORD", "TOKEN", "API_KEY")
+SENSITIVE_VALUE_HINTS = ("sk_live", "p@ss", "secret", "token", "password")
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
@@ -152,6 +154,7 @@ SYSTEM_PROMPT = textwrap.dedent(
     | delete_pod | LAST RESORT - only when no other option | pod_name |
     | wait | Let the system settle | (none) |
     | patch | Modify configmaps/secrets/services | resource_type, name, patch |
+    | create_secret | Create a new Kubernetes Secret (for security task) | name, data |
     | drain_node | Evacuate pods before node maintenance | node_name |
 
     ## ACTION FIELDS
@@ -159,13 +162,21 @@ SYSTEM_PROMPT = textwrap.dedent(
     - deployment: name of deployment (frontend, backend, auth-service, api-gateway, database)
     - replicas: integer 1-20 (for scale)
     - pod_name: exact pod name to delete
-    - resource_type: deployment|pod|node|service|configmap|hpa
+    - resource_type: deployment|pod|node|service|configmap|hpa|secret
     - name: resource name to describe/patch
     - patch: JSON object with changes
     - min_replicas: 1-10 (for set_hpa)
     - max_replicas: 1-20 (for set_hpa)
     - cpu_target_percent: 10-90 (for set_hpa)
     - node_name: node-X to drain
+    - data: key-value pairs for create_secret (e.g., {"API_KEY": "value", "DB_PASSWORD": "value"})
+
+    ## SECURITY TASK
+    When fixing exposed credentials in ConfigMaps:
+    1. Describe configmaps to find exposed keys (API_KEY, DB_PASSWORD, JWT_SECRET, etc.)
+    2. Use create_secret to create a Secret with those credentials
+    3. Use patch to remove sensitive keys from ConfigMap data using patch.data, e.g. {"data":{"API_KEY":null}}
+    Create secrets BEFORE removing from ConfigMaps to avoid data loss.
 
     ## DECISION TREE
     Standard troubleshooting best practices apply, but here are some common scenarios:
@@ -192,6 +203,7 @@ SYSTEM_PROMPT = textwrap.dedent(
     {"action_type":"scale","deployment":"backend","replicas":4}
     {"action_type":"describe","resource_type":"pod","name":"frontend-xyz-abc"}
     {"action_type":"wait"}
+    {"action_type":"create_secret","name":"frontend-secret","data":{"API_KEY":"sk_live_xxx","DB_PASSWORD":"secret"}}
 
     Your reply (JSON only):
     """
@@ -248,11 +260,118 @@ def _to_dict(obj: Any) -> Dict[str, Any]:
     return vars(obj)
 
 
+def _is_sensitive_entry(key: Any, value: Any) -> bool:
+    if not isinstance(key, str):
+        return False
+
+    key_upper = key.upper()
+    if key_upper in SENSITIVE_KEYS or any(hint in key_upper for hint in SENSITIVE_KEY_HINTS):
+        return True
+
+    value_lower = str(value).lower()
+    return any(hint in value_lower for hint in SENSITIVE_VALUE_HINTS)
+
+
+def _find_security_exposures(observation: Any) -> List[Dict[str, Any]]:
+    obs = _to_dict(observation)
+    exposures: List[Dict[str, Any]] = []
+
+    for configmap in obs.get("configmaps", []):
+        if not isinstance(configmap, dict):
+            continue
+        name = configmap.get("name")
+        data = configmap.get("data")
+        if not isinstance(name, str) or not isinstance(data, dict):
+            continue
+
+        exposed_keys: List[str] = []
+        exposed_values: Dict[str, str] = {}
+        for key, value in data.items():
+            if _is_sensitive_entry(key, value):
+                exposed_keys.append(key)
+                if value is not None:
+                    exposed_values[key] = value if isinstance(value, str) else str(value)
+
+        if exposed_keys:
+            exposures.append(
+                {
+                    "name": name,
+                    "keys": sorted(set(exposed_keys)),
+                    "values": exposed_values,
+                }
+            )
+
+    return exposures
+
+
+def _secret_name_for_configmap(configmap_name: str) -> str:
+    if configmap_name.endswith("-config"):
+        return f"{configmap_name[:-7]}-secret"
+    return f"{configmap_name}-secret"
+
+
+def _security_deterministic_action(observation: Any) -> Dict[str, Any]:
+    obs = _to_dict(observation)
+    secret_names = {
+        s.get("name")
+        for s in obs.get("secrets", [])
+        if isinstance(s, dict) and isinstance(s.get("name"), str)
+    }
+
+    exposures = _find_security_exposures(obs)
+    for exposure in exposures:
+        configmap_name = exposure["name"]
+        secret_name = _secret_name_for_configmap(configmap_name)
+        secret_data = exposure.get("values", {})
+        if secret_name not in secret_names and secret_data:
+            return {
+                "action_type": "create_secret",
+                "name": secret_name,
+                "data": secret_data,
+            }
+
+        return {
+            "action_type": "patch",
+            "resource_type": "configmap",
+            "name": configmap_name,
+            "patch": {"data": {key: None for key in exposure.get("keys", [])}},
+        }
+
+    return {"action_type": "wait"}
+
+
+def _summarize_describe_detail(describe_detail: Any) -> Optional[str]:
+    if not isinstance(describe_detail, dict):
+        return None
+
+    resource_type = describe_detail.get("type")
+    name = describe_detail.get("name")
+    resource = describe_detail.get("resource")
+
+    if resource_type != "configmap" or not isinstance(name, str) or not isinstance(resource, dict):
+        return None
+
+    data = resource.get("data")
+    if not isinstance(data, dict):
+        return f"Describe configmap/{name}: data=none"
+
+    exposed_keys = [key for key, value in data.items() if _is_sensitive_entry(key, value)]
+    if exposed_keys:
+        return f"Describe configmap/{name}: exposed_keys={','.join(sorted(set(exposed_keys)))}"
+    return f"Describe configmap/{name}: exposed_keys=none"
+
+
 def _observation_summary(observation: Any) -> str:
     obs = _to_dict(observation)
     pods = obs.get("pods", [])
     deployments = obs.get("deployments", [])
     events = obs.get("events", [])
+    exposures = _find_security_exposures(obs)
+    secret_names = [
+        s.get("name")
+        for s in obs.get("secrets", [])
+        if isinstance(s, dict) and isinstance(s.get("name"), str)
+    ]
 
     pod_status_counts: Dict[str, int] = {}
     for pod in pods:
@@ -270,6 +389,8 @@ def _observation_summary(observation: Any) -> str:
         for e in events[-5:]
     ]
 
+    exposure_lines = [f"{entry['name']}: {','.join(entry['keys'])}" for entry in exposures]
+
     return textwrap.dedent(
         f"""
         Objective: {obs.get("objective", "")}
@@ -277,6 +398,10 @@ def _observation_summary(observation: Any) -> str:
         Pod status counts: {pod_status_counts}
         Deployments:
         {chr(10).join(deployment_lines) if deployment_lines else "None"}
+        Security findings (configmaps with exposed keys):
+        {chr(10).join(exposure_lines) if exposure_lines else "None"}
+        Secrets present:
+        {', '.join(secret_names) if secret_names else "None"}
         Recent events:
         {chr(10).join(recent_events) if recent_events else "None"}
         """
@@ -287,17 +412,30 @@ def build_user_prompt(
     task_name: str, step: int, observation: Any, history: List[str]
 ) -> str:
     history_block = "\n".join(history[-4:]) if history else "None"
+    task_hint = ""
+    if task_name == "security":
+        task_hint = textwrap.dedent(
+            """
+            Security hint:
+            - Do not repeat describe on the same configmaps.
+            - After creating a Secret, patch the ConfigMap using patch.data with null values for sensitive keys.
+            - If no exposed keys remain, return {"action_type":"wait"}.
+            """
+        ).strip()
+
     return textwrap.dedent(
         f"""
         Task: {task_name}
         Step: {step}
         Current cluster summary:
         {_observation_summary(observation)}
+        {task_hint}
         Previous steps:
         {history_block}
         Return one valid next action as pure JSON.
         """
     ).strip()
+
 
 def _extract_visible_text(message) -> str:
     """
@@ -314,7 +452,7 @@ def _extract_visible_text(message) -> str:
         parts = []
         for block in content:
             block_type = getattr(block, "type", None)
-            if block_type in ("text", None):          # keep text blocks
+            if block_type in ("text", None):  # keep text blocks
                 parts.append(getattr(block, "text", "") or "")
             # skip "reasoning", "thinking", "tool_use", etc.
         return "".join(parts).strip()
@@ -322,10 +460,12 @@ def _extract_visible_text(message) -> str:
     # Case 2: plain string — strip any <think>…</think> wrappers some models emit
     if isinstance(content, str):
         import re
+
         cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
         return cleaned.strip()
 
     return ""
+
 
 def _safe_json_action(text: str) -> Optional[Dict[str, Any]]:
     def _extract_action_dict(parsed: Any) -> Optional[Dict[str, Any]]:
@@ -453,10 +593,13 @@ def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
         "drain_node",
         "describe",
         "wait",
+        "create_secret",
     }
     if action_type not in valid_action_types:
         # Recover from malformed outputs (e.g., action_type="backend").
-        if any(k in action for k in ("min_replicas", "max_replicas", "cpu_target_percent")):
+        if any(
+            k in action for k in ("min_replicas", "max_replicas", "cpu_target_percent")
+        ):
             inferred_action_type = "set_hpa"
         elif "replicas" in action:
             inferred_action_type = "scale"
@@ -518,6 +661,7 @@ def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
         "max_replicas",
         "cpu_target_percent",
         "node_name",
+        "data",
     }
     for field in allowed_fields:
         if field in action and action[field] is not None:
@@ -548,6 +692,10 @@ def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
         if action_type != "patch":
             normalized.pop("patch", None)
 
+    if action_type == "create_secret":
+        normalized.pop("resource_type", None)
+        normalized.pop("patch", None)
+
     defaults_by_type = {
         "describe": {"resource_type": "deployment", "name": "frontend"},
         "scale": {"deployment": "frontend", "replicas": 3},
@@ -562,6 +710,7 @@ def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
             "cpu_target_percent": 70,
         },
         "wait": {},
+        "create_secret": {"name": "new-secret", "data": {}},
     }
     for k, v in defaults_by_type.get(action_type, {}).items():
         normalized.setdefault(k, v)
@@ -575,6 +724,139 @@ def _find_deployment_name(observation: Dict[str, Any], preferred: str) -> Option
     if preferred in names:
         return preferred
     return names[0] if names else None
+
+
+def _find_resource_name(
+    observation: Any, resource_type: str, preferred: str
+) -> Optional[str]:
+    obs = _to_dict(observation)
+    collection_by_type = {
+        "deployment": "deployments",
+        "pod": "pods",
+        "node": "nodes",
+        "service": "services",
+        "configmap": "configmaps",
+        "secret": "secrets",
+        "hpa": "hpas",
+        "ingress": "ingresses",
+        "pvc": "persistentvolumeclaims",
+    }
+    collection = collection_by_type.get(resource_type)
+    if not collection:
+        return preferred
+
+    names: List[str] = []
+    for item in obs.get(collection, []):
+        if isinstance(item, dict):
+            name = item.get("name")
+        else:
+            name = getattr(item, "name", None)
+        if isinstance(name, str) and name:
+            names.append(name)
+
+    if preferred in names:
+        return preferred
+    return names[0] if names else preferred
+
+
+def _repair_action_for_server(
+    action: Dict[str, Any], task_name: str, observation: Any
+) -> Dict[str, Any]:
+    repaired = _normalize_action(action)
+    action_type = repaired.get("action_type", "describe")
+
+    if action_type == "create_secret":
+        name = repaired.get("name")
+        if isinstance(name, str):
+            name = name.strip()
+        if not name:
+            name = "app-secret"
+        repaired["name"] = name
+
+        raw_data = repaired.get("data")
+        sanitized_data: Dict[str, str] = {}
+        if isinstance(raw_data, dict):
+            for key, value in raw_data.items():
+                if not isinstance(key, str):
+                    continue
+                if value is None:
+                    continue
+                sanitized_data[key] = value if isinstance(value, str) else str(value)
+
+        repaired["data"] = sanitized_data
+
+        # Some providers emit an empty create_secret call; gather more context instead.
+        if task_name == "security" and not sanitized_data:
+            preferred = _find_resource_name(
+                observation, "configmap", preferred="frontend-config"
+            )
+            return _normalize_action(
+                {
+                    "action_type": "describe",
+                    "resource_type": "configmap",
+                    "name": preferred,
+                }
+            )
+
+    if repaired.get("action_type") == "describe":
+        allowed_resource_types = {
+            "deployment",
+            "pod",
+            "node",
+            "service",
+            "configmap",
+            "secret",
+        }
+        resource_type = repaired.get("resource_type")
+        if resource_type not in allowed_resource_types:
+            resource_type = "configmap" if task_name == "security" else "deployment"
+            repaired["resource_type"] = resource_type
+
+        preferred_name = "frontend"
+        if resource_type == "configmap":
+            preferred_name = "frontend-config"
+        elif resource_type == "secret":
+            preferred_name = "frontend-secret"
+
+        name = repaired.get("name")
+        if not isinstance(name, str) or not name.strip():
+            repaired["name"] = _find_resource_name(
+                observation, resource_type, preferred=preferred_name
+            )
+
+    if (
+        task_name == "security"
+        and repaired.get("action_type") == "patch"
+        and repaired.get("resource_type") == "configmap"
+    ):
+        configmap_name = repaired.get("name")
+        if not isinstance(configmap_name, str) or not configmap_name.strip():
+            configmap_name = _find_resource_name(
+                observation, "configmap", preferred="frontend-config"
+            )
+            repaired["name"] = configmap_name
+
+        raw_patch = repaired.get("patch")
+        patch = raw_patch if isinstance(raw_patch, dict) else {}
+        data_patch = patch.get("data")
+
+        if isinstance(data_patch, dict):
+            normalized_data_patch = data_patch
+        else:
+            normalized_data_patch = {
+                key: value for key, value in patch.items() if key != "data"
+            }
+
+        if not normalized_data_patch:
+            exposures_by_cm = {
+                entry["name"]: entry["keys"] for entry in _find_security_exposures(observation)
+            }
+            keys_to_remove = exposures_by_cm.get(configmap_name, [])
+            normalized_data_patch = {key: None for key in keys_to_remove}
+
+        repaired["patch"] = {"data": normalized_data_patch}
+
+    return repaired
 
 
 def _task_fallback_action(
@@ -658,7 +940,21 @@ async def get_model_action(
 
             parsed = _safe_json_action(text)
             if isinstance(parsed, dict):
-                return _normalize_action(parsed)
+                repaired = _repair_action_for_server(parsed, task_name, observation)
+                if task_name == "security" and repaired.get("action_type") == "describe":
+                    recent_describes = sum(
+                        1 for entry in history[-4:] if '"action_type":"describe"' in entry
+                    )
+                    if recent_describes >= 3:
+                        fallback_security_action = _security_deterministic_action(observation)
+                        if fallback_security_action.get("action_type") != "wait":
+                            debug_log(
+                                "Security anti-stall triggered; replacing repeated describe with deterministic action"
+                            )
+                            return _repair_action_for_server(
+                                fallback_security_action, task_name, observation
+                            )
+                return repaired
 
             debug_log(
                 f"JSON parse failed task={task_name} step={step} "
@@ -670,11 +966,21 @@ async def get_model_action(
             if attempt == max_attempts - 1:
                 raise
 
-    fallback = _normalize_action(_task_fallback_action(task_name, step, observation))
+    fallback_candidate = (
+        _security_deterministic_action(observation)
+        if task_name == "security"
+        else _task_fallback_action(task_name, step, observation)
+    )
+    fallback = _repair_action_for_server(
+        fallback_candidate,
+        task_name,
+        observation,
+    )
     debug_log(
         f"Using fallback action task={task_name} step={step}: {json.dumps(fallback, separators=(',', ':'))}"
     )
     return fallback
+
 
 async def main() -> None:
     if not API_KEY:
@@ -696,6 +1002,8 @@ async def main() -> None:
             success = False
             final_obs: Optional[Any] = None
             should_retry_task = False
+            episode_done = False
+            episode_truncated = False
 
             log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
@@ -708,6 +1016,7 @@ async def main() -> None:
                         if API_DELAY > 0:
                             await asyncio.sleep(API_DELAY)
                         if result.done:
+                            episode_done = True
                             log_step(
                                 step=step,
                                 action="",
@@ -721,17 +1030,73 @@ async def main() -> None:
                             client, TASK_NAME, step, final_obs, history
                         )
                         action = CoenvAction(**action_payload)
-                        result = await env.step(action)
+                        try:
+                            result = await env.step(action)
+                        except Exception as step_exc:
+                            step_error = str(step_exc)
+                            if (
+                                "VALIDATION_ERROR" not in step_error
+                                and "Invalid message" not in step_error
+                            ):
+                                raise
+
+                            debug_log(
+                                "Step rejected by server validation "
+                                f"task={TASK_NAME} step={step} action={json.dumps(action_payload, separators=(',', ':'))} "
+                                f"error={step_error}"
+                            )
+
+                            retry_candidates: List[Dict[str, Any]] = [
+                                _repair_action_for_server(
+                                    _task_fallback_action(TASK_NAME, step, final_obs),
+                                    TASK_NAME,
+                                    final_obs,
+                                ),
+                                {"action_type": "wait"},
+                            ]
+                            recovered = False
+
+                            for candidate in retry_candidates:
+                                if candidate == action_payload:
+                                    continue
+                                try:
+                                    fallback_action = CoenvAction(**candidate)
+                                    result = await env.step(fallback_action)
+                                    action_payload = candidate
+                                    action = fallback_action
+                                    recovered = True
+                                    debug_log(
+                                        "Recovered with fallback action "
+                                        f"task={TASK_NAME} step={step} action={json.dumps(candidate, separators=(',', ':'))}"
+                                    )
+                                    break
+                                except Exception as retry_exc:
+                                    debug_log(
+                                        "Fallback action also failed "
+                                        f"task={TASK_NAME} step={step} error={retry_exc}"
+                                    )
+
+                            if not recovered:
+                                raise
+
                         obs = result.observation
                         final_obs = obs
 
                         reward = result.reward or 0.0
                         done = result.done
-                        error = (
-                            (obs.metadata or {}).get("error")
-                            if hasattr(obs, "metadata")
-                            else None
+                        metadata = (
+                            (obs.metadata or {}) if hasattr(obs, "metadata") else {}
                         )
+                        error = metadata.get("error")
+                        if metadata.get("truncated"):
+                            episode_truncated = True
+                        episode_done = done
+
+                        describe_note = _summarize_describe_detail(
+                            metadata.get("describe_detail")
+                        )
+                        if describe_note:
+                            history.append(describe_note)
 
                         rewards.append(reward)
                         steps_taken = step
@@ -751,9 +1116,7 @@ async def main() -> None:
                         if done:
                             break
             except websockets.exceptions.ConnectionClosedError as exc:
-                debug_log(
-                    f"Connection closed unexpectedly for task={TASK_NAME}: {exc}"
-                )
+                debug_log(f"Connection closed unexpectedly for task={TASK_NAME}: {exc}")
                 should_retry_task = retries_left > 0
                 if should_retry_task:
                     debug_log(
@@ -765,9 +1128,14 @@ async def main() -> None:
                 )
 
             finally:
-                score = sum(rewards) / len(rewards) if rewards else 0.0
+                score = rewards[-1] if rewards else 0.0
                 score = _clamp_open_unit_interval(score, eps=1e-6)
-                success = score >= SUCCESS_SCORE_THRESHOLD
+                score_threshold = SUCCESS_SCORE_THRESHOLD_BY_TASK.get(
+                    TASK_NAME, SUCCESS_SCORE_THRESHOLD
+                )
+                success = (
+                    episode_done and not episode_truncated and score >= score_threshold
+                )
 
                 log_end(
                     success=success, steps=steps_taken, score=score, rewards=rewards

@@ -198,6 +198,8 @@ class KubeAction(BaseModel):
         "set_hpa",
         "drain_node",
         "describe",
+        "wait",
+        "create_secret",
     ]
 
 

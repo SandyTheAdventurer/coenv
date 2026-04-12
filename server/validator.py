@@ -9,6 +9,7 @@ from server.actions import (
     DrainNodeAction,
     DescribeAction,
     WaitAction,
+    CreateSecretAction,
 )
 
 
@@ -29,6 +30,8 @@ def validate(action: KubeAction, world_state: Dict[str, Any]) -> Optional[str]:
         return _validate_describe(action, world_state)
     elif isinstance(action, WaitAction):
         return None
+    elif isinstance(action, CreateSecretAction):
+        return _validate_create_secret(action, world_state)
     return None
 
 
@@ -79,15 +82,25 @@ def _validate_patch(action: PatchAction, world_state: Dict[str, Any]) -> Optiona
         if name not in configmap_names:
             return f"ConfigMap '{name}' not found. Available: {configmap_names}"
 
-    elif resource_type == "service":
-        services = world_state.get("services", [])
-        service_names = [s.get("name") for s in services]
-        if name not in service_names:
-            return f"Service '{name}' not found. Available: {service_names}"
+    elif resource_type == "secret":
+        secrets = world_state.get("secrets", [])
+        secret_names = [s.get("name") for s in secrets]
+        if name not in secret_names:
+            return f"Secret '{name}' not found. Available: {secret_names}"
 
     else:
-        return f"Invalid resource_type: {resource_type}. Must be one of: deployment, configmap, service"
+        return f"Invalid resource_type: {resource_type}. Must be one of: deployment, pod, node, service, configmap, secret"
 
+    return None
+
+
+def _validate_create_secret(
+    action: CreateSecretAction, world_state: Dict[str, Any]
+) -> Optional[str]:
+    if not action.name:
+        return "Secret name is required"
+    if not action.data:
+        return "Secret data is required"
     return None
 
 

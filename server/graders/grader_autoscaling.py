@@ -69,7 +69,7 @@ def grade(world_state: Dict[str, Any], step: int, max_steps: int) -> float:
     # Strong step penalty: longer trajectories are penalized quadratically.
     if max_steps > 0:
         progress_ratio = min(max(step / max_steps, 0.0), 1.0)
-        efficiency_factor = 1.0 - (progress_ratio * 0.5)
+        efficiency_factor = 1.0 - (progress_ratio * 0.2)
         score = quality_score * efficiency_factor
     else:
         score = quality_score
