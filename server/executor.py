@@ -10,6 +10,7 @@ from server.actions import (
     DrainNodeAction,
     DescribeAction,
     WaitAction,
+    CreateSecretAction,
 )
 from server.models import ClusterObservation
 
@@ -38,6 +39,8 @@ def execute(action: KubeAction, world) -> ExecutionResult:
         return _execute_describe(action, world)
     elif isinstance(action, WaitAction):
         return _execute_wait(world)
+    elif isinstance(action, CreateSecretAction):
+        return _execute_create_secret(action, world)
     else:
         raise ValueError(f"Unknown action type: {type(action)}")
 
@@ -48,7 +51,7 @@ def _execute_scale(action: ScaleAction, world) -> ExecutionResult:
     return ExecutionResult(
         observation=world.get_observation(),
         action_applied=f"Scaled '{action.deployment}' to {action.replicas} replicas",
-        tick_advanced=True
+        tick_advanced=True,
     )
 
 
@@ -58,7 +61,7 @@ def _execute_delete_pod(action: DeletePodAction, world) -> ExecutionResult:
     return ExecutionResult(
         observation=world.get_observation(),
         action_applied=f"Deleted pod '{action.pod_name}'",
-        tick_advanced=True
+        tick_advanced=True,
     )
 
 
@@ -68,7 +71,7 @@ def _execute_patch(action: PatchAction, world) -> ExecutionResult:
     return ExecutionResult(
         observation=world.get_observation(),
         action_applied=f"Patched {action.resource_type} '{action.name}'",
-        tick_advanced=True
+        tick_advanced=True,
     )
 
 
@@ -78,7 +81,7 @@ def _execute_rollout_restart(action: RolloutRestartAction, world) -> ExecutionRe
     return ExecutionResult(
         observation=world.get_observation(),
         action_applied=f"Rollout restarted '{action.deployment}'",
-        tick_advanced=True
+        tick_advanced=True,
     )
 
 
@@ -87,13 +90,13 @@ def _execute_set_hpa(action: SetHPAAction, world) -> ExecutionResult:
         action.deployment,
         action.min_replicas,
         action.max_replicas,
-        action.cpu_target_percent
+        action.cpu_target_percent,
     )
     world.tick()
     return ExecutionResult(
         observation=world.get_observation(),
         action_applied=f"Set HPA for '{action.deployment}': {action.min_replicas}-{action.max_replicas} replicas, {action.cpu_target_percent}% CPU",
-        tick_advanced=True
+        tick_advanced=True,
     )
 
 
@@ -103,18 +106,19 @@ def _execute_drain_node(action: DrainNodeAction, world) -> ExecutionResult:
     return ExecutionResult(
         observation=world.get_observation(),
         action_applied=f"Drained node '{action.node_name}'",
-        tick_advanced=True
+        tick_advanced=True,
     )
 
 
 def _execute_describe(action: DescribeAction, world) -> ExecutionResult:
     detail = world.describe(action.resource_type, action.name)
+    world.tick()  # Describe advances time - gathering info costs resources
     obs = world.get_observation()
     return ExecutionResult(
         observation=obs,
         action_applied=f"Described {action.resource_type} '{action.name}'",
-        tick_advanced=False,
-        describe_detail=detail
+        tick_advanced=True,
+        describe_detail=detail,
     )
 
 
@@ -123,5 +127,21 @@ def _execute_wait(world) -> ExecutionResult:
     return ExecutionResult(
         observation=world.get_observation(),
         action_applied="Waited one simulation tick",
+        tick_advanced=True,
+    )
+
+
+def _execute_create_secret(action: CreateSecretAction, world) -> ExecutionResult:
+    new_secret = {
+        "name": action.name,
+        "data": action.data,
+        "type": "Opaque",
+        "created_at": world.get_observation().step,
+    }
+    world.cluster_state["secrets"].append(new_secret)
+    world.tick()
+    return ExecutionResult(
+        observation=world.get_observation(),
+        action_applied=f"Created Secret '{action.name}'",
         tick_advanced=True,
     )

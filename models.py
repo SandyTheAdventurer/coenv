@@ -34,6 +34,8 @@ from server.models import (
 class CoenvAction(Action):
     """Action model for the Kubernetes simulator."""
 
+    model_config = {"extra": "allow"}  # Allow extra fields
+
     action_type: Literal[
         "scale",
         "delete_pod",
@@ -43,6 +45,7 @@ class CoenvAction(Action):
         "drain_node",
         "describe",
         "wait",
+        "create_secret",
     ] = Field(..., description="Type of action to execute")
 
     deployment: Optional[str] = Field(default=None)
@@ -67,6 +70,7 @@ class CoenvAction(Action):
     max_replicas: Optional[int] = Field(default=None)
     cpu_target_percent: Optional[int] = Field(default=None)
     node_name: Optional[str] = Field(default=None)
+    data: Optional[Dict[str, Any]] = Field(default=None)
 
 
 class CoenvObservation(Observation):

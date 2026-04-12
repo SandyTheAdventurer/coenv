@@ -3,6 +3,7 @@ import pytest
 from inference import (
     _clamp_open_unit_interval,
     _normalize_action,
+    _repair_action_for_server,
     _safe_json_action,
     _task_fallback_action,
     log_end,
@@ -105,6 +106,34 @@ def test_normalize_action_infers_valid_type_from_invalid_action_type_value():
     assert action["min_replicas"] == 2
     assert action["max_replicas"] == 8
     assert action["cpu_target_percent"] == 70
+
+
+def test_repair_action_for_server_coerces_secret_data_values_to_strings():
+    action = _repair_action_for_server(
+        {
+            "action_type": "create_secret",
+            "name": "api-credentials",
+            "data": {"API_KEY": "sk_live_xxx", "ROTATION_DAYS": 30, "EMPTY": None},
+        },
+        task_name="security",
+        observation={"configmaps": [{"name": "frontend-config", "data": {}}]},
+    )
+
+    assert action["action_type"] == "create_secret"
+    assert action["name"] == "api-credentials"
+    assert action["data"] == {"API_KEY": "sk_live_xxx", "ROTATION_DAYS": "30"}
+
+
+def test_repair_action_for_server_empty_secret_data_falls_back_to_describe():
+    action = _repair_action_for_server(
+        {"action_type": "create_secret", "name": "", "data": {}},
+        task_name="security",
+        observation={"configmaps": [{"name": "database-config", "data": {}}]},
+    )
+
+    assert action["action_type"] == "describe"
+    assert action["resource_type"] == "configmap"
+    assert action["name"] == "database-config"
 
 
 def test_task_fallback_action_autoscaling_targets_backend():

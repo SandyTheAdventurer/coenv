@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Dict, Any, Optional
 import json
 import os
+from datetime import datetime
 from openenv.core.env_server.interfaces import Environment
 
 try:
@@ -239,6 +240,11 @@ def validate_action(action: CoenvAction, world: World) -> Optional[str]:
             configmap_names = [_get_field(c, "name") for c in configmaps]
             if name not in configmap_names:
                 return f"ConfigMap '{name}' not found. Available: {configmap_names}"
+        elif resource_type == "secret":
+            secrets = world_state.get("secrets", [])
+            secret_names = [_get_field(s, "name") for s in secrets]
+            if name not in secret_names:
+                return f"Secret '{name}' not found. Available: {secret_names}"
 
     return None
 
@@ -583,6 +589,16 @@ class CoenvEnvironment(Environment):
 
             elif action.action_type == "wait":
                 info["waited"] = True
+
+            elif action.action_type == "create_secret":
+                new_secret = {
+                    "name": action.name,
+                    "data": action.data or {},
+                    "type": "Opaque",
+                    "last_updated": datetime.now().isoformat(),
+                }
+                self.world.cluster_state["secrets"].append(new_secret)
+                info["secret_created"] = action.name
 
             else:
                 info["error"] = f"Unknown action type: {action.action_type}"

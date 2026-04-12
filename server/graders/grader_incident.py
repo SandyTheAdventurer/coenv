@@ -1,8 +1,12 @@
 """
 Grader for Incident Task
+
+Action-based scoring: rewards the agent for taking correct actions (restarting
+failed services) rather than outcome (services being healthy). This is more
+logically correct for RL - the agent controls its actions, not recovery time.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List, Set
 
 
 def _get_field(obj: Dict[str, Any], key: str, default: Any = None) -> Any:
@@ -13,46 +17,40 @@ def _get_field(obj: Dict[str, Any], key: str, default: Any = None) -> Any:
 
 
 def grade(world_state: Dict[str, Any], step: int, max_steps: int) -> float:
-    """Grade the incident task"""
-    quality_score = 0.0
-
+    """Grade the incident task based on actions taken."""
     key_services = ["auth-service", "api-gateway", "frontend"]
-    healthy_services = 0
 
-    deployments = world_state.get("deployments", [])
+    injected_failures = world_state.get("injected_failures", {})
+    failed_services = set(injected_failures.keys())
+
+    restored_services = set()
     for service_name in key_services:
-        deployment = next(
-            (d for d in deployments if _get_field(d, "name") == service_name),
-            None,
-        )
-        if deployment:
-            desired = _get_field(deployment, "desired_replicas", 0)
-            available = _get_field(deployment, "available_replicas", 0)
+        if service_name not in failed_services:
+            restored_services.add(service_name)
 
-            if desired > 0:
-                if available / desired >= 0.8:
-                    healthy_services += 1
-
-    if key_services:
-        service_health_score = healthy_services / len(key_services)
-        quality_score += service_health_score * 0.6
+    if failed_services:
+        restoration_ratio = len(restored_services) / len(key_services)
+    else:
+        restoration_ratio = 1.0
 
     pods = world_state.get("pods", [])
     key_service_pods = [p for p in pods if _get_field(p, "deployment") in key_services]
+
     crashloop_pods = [
         p for p in key_service_pods if _get_field(p, "status") == "CrashLoopBackOff"
     ]
 
     if key_service_pods:
         crashloop_ratio = len(crashloop_pods) / len(key_service_pods)
-        # Penalize for crashlooping pods (inverse relationship)
-        health_bonus = (1.0 - crashloop_ratio) * 0.3  # 30% for no crashloops
-        quality_score += health_bonus
+        stability_bonus = (1.0 - crashloop_ratio) * 0.3
+    else:
+        stability_bonus = 0.0
 
-    # Strong step penalty: longer trajectories are penalized quadratically.
+    quality_score = (restoration_ratio * 0.7) + stability_bonus
+
     if max_steps > 0:
         progress_ratio = min(max(step / max_steps, 0.0), 1.0)
-        efficiency_factor = 1.0 - (progress_ratio * 0.5)
+        efficiency_factor = 1.0 - (progress_ratio * 0.2)
         score = quality_score * efficiency_factor
     else:
         score = quality_score

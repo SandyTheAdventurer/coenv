@@ -405,7 +405,49 @@ class World:
             elif resource_type == "configmap":
                 for cm in self.cluster_state["configmaps"]:
                     if cm["name"] == name:
-                        cm.update(patch)
+                        # ConfigMap patches should primarily affect the nested data map.
+                        # Keep backward compatibility with legacy patches that put keys at top-level.
+                        patch_map = dict(patch) if isinstance(patch, dict) else {}
+                        data_patch = patch_map.pop("data", None)
+
+                        inline_data_patch: Dict[str, Any] = {}
+                        sensitive_tokens = ("SECRET", "PASSWORD", "TOKEN", "API_KEY")
+                        current_data = cm.get("data", {})
+                        current_data_keys = (
+                            set(current_data.keys()) if isinstance(current_data, dict) else set()
+                        )
+
+                        for key in list(patch_map.keys()):
+                            if not isinstance(key, str):
+                                continue
+                            key_upper = key.upper()
+                            if key in current_data_keys or any(
+                                token in key_upper for token in sensitive_tokens
+                            ):
+                                inline_data_patch[key] = patch_map.pop(key)
+
+                        cm.update(patch_map)
+
+                        merged_data_patch: Dict[str, Any] = {}
+                        if isinstance(data_patch, dict):
+                            merged_data_patch.update(data_patch)
+                        merged_data_patch.update(inline_data_patch)
+
+                        if merged_data_patch:
+                            cm_data = cm.get("data")
+                            if not isinstance(cm_data, dict):
+                                cm_data = {}
+
+                            for key, value in merged_data_patch.items():
+                                if not isinstance(key, str):
+                                    continue
+                                if value is None:
+                                    cm_data.pop(key, None)
+                                else:
+                                    cm_data[key] = value if isinstance(value, str) else str(value)
+
+                            cm["data"] = cm_data
+
                         cm["last_updated"] = datetime.now().isoformat()
                         return True
 
@@ -948,6 +990,7 @@ class World:
             "hpas": self.get_hpas(),
             "events": self.get_events(),
             "step": self.step_count,
+            "injected_failures": dict(self._injected_failures),
         }
 
     def reset_to_healthy(self):
@@ -971,3 +1014,7 @@ class World:
         observation_dict["logs"] = self.get_logs("frontend") + self.get_logs("backend")
         observation_dict["metrics"] = self.get_metrics()
         return ClusterObservation(**observation_dict)
+
+    def get_raw_state(self) -> Dict[str, Any]:
+        """Alias for get_full_state() for compatibility"""
+        return self.get_full_state()
