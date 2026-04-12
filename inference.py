@@ -50,7 +50,7 @@ import os
 import websockets
 import sys
 import textwrap
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from openai import AsyncOpenAI
 
@@ -66,10 +66,6 @@ except ImportError:
     from models import CoenvAction
     from client import CoEnv
 
-from server.graders.grader_pod_recovery import grade as grade_pod_recovery
-from server.graders.grader_autoscaling import grade as grade_autoscaling
-from server.graders.grader_incident import grade as grade_incident
-
 if load_dotenv is not None:
     load_dotenv()
 
@@ -77,18 +73,41 @@ ENV_URL = os.getenv("ENV_URL", "https://Nightreigners-COEnv.hf.space")
 
 LLM_BASE_URL = (
     os.getenv("API_BASE_URL")
-    or os.getenv("LLM_BASE_URL")
     or "https://router.huggingface.co/v1"
 )
 MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3-8B")
 API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
+DEBUG = os.getenv("DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 
-API_DELAY = 4
 BENCHMARKS = ["POD_RECOVERY", "AUTOSCALING", "INCIDENT"]
 TASK_NAMES = ["pod_recovery", "autoscaling", "incident"]
 
+API_DELAY = 0
+_model_thinks: Optional[bool] = None
 TEMPERATURE = 0.3
-MAX_TOKENS = 512
+MAX_TOKENS   = 1024
+
+def _is_thinking_response(message) -> bool:
+    """Check if the response actually contained reasoning/thinking tokens."""
+    content = message.content
+    
+    # Check 1: content is a list of blocks with a reasoning/thinking block
+    if isinstance(content, list):
+        return any(
+            getattr(block, "type", "") in ("reasoning", "thinking")
+            for block in content
+        )
+    
+    # Check 2: some providers expose reasoning separately
+    if getattr(message, "reasoning_content", None):
+        return True
+    
+    # Check 3: raw <think> tags in string content (HF/Qwen style)
+    if isinstance(content, str) and "<think>" in content:
+        return True
+    
+    return False
+
 SUCCESS_SCORE_THRESHOLD = 0.1  # normalized score in [0, 1]
 DEFAULT_MAX_STEPS = 15
 
@@ -109,38 +128,79 @@ MAX_STEPS_BY_TASK = {
     "incident": 20,
 }
 
-GRADERS: Dict[str, Callable[[Dict[str, Any], int, int], float]] = {
-    "pod_recovery": grade_pod_recovery,
-    "autoscaling": grade_autoscaling,
-    "incident": grade_incident,
-}
-
 SYSTEM_PROMPT = textwrap.dedent(
     """
-    You are a Kubernetes incident-response agent. Your reply must be ONLY a JSON object — no preamble, no explanation, no markdown, no code fences, no thinking text.
-    Remember that more actions and more dangerous actions taken will reduce the final score, so be efficient and only take necessary actions.
+    You are an expert Kubernetes cluster operator and incident-response agent.
 
-    Valid action_type values: scale, delete_pod, patch, rollout_restart, set_hpa, drain_node, describe, wait
+    ## OUTPUT FORMAT
+    Your response must be ONLY a valid JSON object — no preamble, no explanation, no markdown, no code fences, no thinking text.
+    Always use lowercase for action_type and keys.
 
-    Action fields:
-    - action_type (required)
-    - deployment: name of deployment (for scale/rollout_restart/patch/set_hpa)
-    - replicas: integer (for scale)
-    - pod_name: name of pod (for delete_pod)
-    - resource_type: one of deployment, pod, node, service, configmap, hpa (for describe/patch)
-    - name: resource name (for describe/patch)
-    - patch: JSON patch spec (for patch)
-    - min_replicas, max_replicas, cpu_target_percent: integers (for set_hpa)
-    - node_name: string (for drain_node)
+    ## SCORING
+    - Higher scores for faster resolution (fewer steps = higher bonus)
+    - Unnecessary actions reduce your score
+    - Dangerous actions (delete_pod, drain_node) should be last resort only
 
-    EXAMPLE VALID REPLIES:
-    {"action_type":"describe","resource_type":"deployment","name":"frontend"}
+    ## AVAILABLE ACTIONS
+
+    | Action | When to Use | Required Fields |
+    |--------|-----------|----------------|
+    | rollout_restart | RECOMMENDED for CrashLoopBackOff, ImagePullBackOff, OOMKill - triggers rolling update | deployment |
+    | scale | Scale replicas up/down | deployment, replicas |
+    | set_hpa | Configure autoscaling for traffic spikes | deployment, min_replicas, max_replicas, cpu_target_percent |
+    | describe | Inspect resources for diagnosis (use sparingly) | resource_type, name |
+    | delete_pod | LAST RESORT - only when no other option | pod_name |
+    | wait | Let the system settle | (none) |
+    | patch | Modify configmaps/secrets/services | resource_type, name, patch |
+    | drain_node | Evacuate pods before node maintenance | node_name |
+
+    ## ACTION FIELDS
+    - action_type: (required) which action to perform
+    - deployment: name of deployment (frontend, backend, auth-service, api-gateway, database)
+    - replicas: integer 1-20 (for scale)
+    - pod_name: exact pod name to delete
+    - resource_type: deployment|pod|node|service|configmap|hpa
+    - name: resource name to describe/patch
+    - patch: JSON object with changes
+    - min_replicas: 1-10 (for set_hpa)
+    - max_replicas: 1-20 (for set_hpa)
+    - cpu_target_percent: 10-90 (for set_hpa)
+    - node_name: node-X to drain
+
+    ## DECISION TREE
+    Standard troubleshooting best practices apply, but here are some common scenarios:
+    If pods are CrashLoopBackOff or ImagePullBackOff:
+        → rollout_restart the deployment
+
+    If traffic spike / high CPU / pods pending:
+        → set_hpa with min=2-4, max=6-10, cpu_target=70
+
+    If pod stuck in non-recoverable state:
+        → delete_pod (deployment will recreate)
+
+    If you need info:
+        → describe once, then act
+
+    If all looks good:
+        → wait or scale as needed
+
+    ## EXAMPLE RESPONSES
+
     {"action_type":"rollout_restart","deployment":"frontend"}
-    {"action_type":"delete_pod","pod_name":"frontend-9722-auksc"}
+    {"action_type":"set_hpa","deployment":"backend","min_replicas":2,"max_replicas":8,"cpu_target_percent":70}
+    {"action_type":"describe","resource_type":"deployment","name":"frontend"}
+    {"action_type":"scale","deployment":"backend","replicas":4}
+    {"action_type":"describe","resource_type":"pod","name":"frontend-xyz-abc"}
+    {"action_type":"wait"}
 
-    YOUR REPLY (JSON only, nothing else):
+    Your reply (JSON only):
     """
 ).strip()
+
+
+def debug_log(message: str) -> None:
+    if DEBUG:
+        print(f"[DEBUG] {message}", file=sys.stderr, flush=True)
 
 
 def log_start(task: str, env: str, model: str) -> None:
@@ -239,6 +299,33 @@ def build_user_prompt(
         """
     ).strip()
 
+def _extract_visible_text(message) -> str:
+    """
+    Pull only the assistant's visible text, skipping reasoning/thinking blocks.
+    Handles:
+      - message.content as a list of blocks (OpenAI-style tool/reasoning blocks)
+      - message.reasoning_content  (some providers surface this separately)
+      - Raw string content
+    """
+    content = message.content
+
+    # Case 1: list of content blocks (e.g. from extended thinking APIs)
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            block_type = getattr(block, "type", None)
+            if block_type in ("text", None):          # keep text blocks
+                parts.append(getattr(block, "text", "") or "")
+            # skip "reasoning", "thinking", "tool_use", etc.
+        return "".join(parts).strip()
+
+    # Case 2: plain string — strip any <think>…</think> wrappers some models emit
+    if isinstance(content, str):
+        import re
+        cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        return cleaned.strip()
+
+    return ""
 
 def _safe_json_action(text: str) -> Optional[Dict[str, Any]]:
     def _extract_action_dict(parsed: Any) -> Optional[Dict[str, Any]]:
@@ -252,7 +339,9 @@ def _safe_json_action(text: str) -> Optional[Dict[str, Any]]:
 
             name_val = parsed.get("name")
             arguments = parsed.get("arguments")
-            if isinstance(name_val, str):
+            # Treat name+arguments as function-call style only when arguments is present.
+            # Otherwise regular action payloads like {"name": "backend", ...} can be misread.
+            if isinstance(name_val, str) and "arguments" in parsed:
                 if isinstance(arguments, str):
                     try:
                         arguments = json.loads(arguments)
@@ -271,68 +360,73 @@ def _safe_json_action(text: str) -> Optional[Dict[str, Any]]:
         return None
 
     text = text.strip()
-    try:
-        parsed = json.loads(text)
-        extracted = _extract_action_dict(parsed)
-        return (
-            extracted
-            if extracted is not None
-            else (parsed if isinstance(parsed, dict) else None)
-        )
-    except json.JSONDecodeError:
-        pass
+    if not text:
+        return None
 
-    import re
-
-    patterns = [
-        r"\{[^{}]*\}",
-        r"\{[^{}]*\{[^{}]*\}[^{}]*\}",
-        r"\{[^{}]*\{[^{}]*\{[^{}]*\}[^{}]*\}[^{}]*\}",
-    ]
-    for pattern in patterns:
-        matches = re.findall(pattern, text)
-        for match in matches:
-            try:
-                parsed = json.loads(match)
-                extracted = _extract_action_dict(parsed)
-                return (
-                    extracted
-                    if extracted is not None
-                    else (parsed if isinstance(parsed, dict) else None)
-                )
-            except json.JSONDecodeError:
-                continue
-
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
+    def _parse_candidate(
+        candidate: str, first_generic: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
         try:
-            parsed = json.loads(text[start : end + 1])
+            parsed = json.loads(candidate)
             extracted = _extract_action_dict(parsed)
-            return (
-                extracted
-                if extracted is not None
-                else (parsed if isinstance(parsed, dict) else None)
-            )
+            if extracted is not None:
+                return extracted
+            if first_generic is None and isinstance(parsed, dict):
+                return parsed
+            return first_generic
         except json.JSONDecodeError:
-            pass
+            decoder = json.JSONDecoder()
+            for idx, ch in enumerate(candidate):
+                if ch not in "[{":
+                    continue
+                try:
+                    parsed, _ = decoder.raw_decode(candidate[idx:])
+                except json.JSONDecodeError:
+                    continue
 
-    lines = text.split("\n")
-    for line in lines:
-        line = line.strip()
-        if line.startswith("{") and line.endswith("}"):
-            try:
-                parsed = json.loads(line)
                 extracted = _extract_action_dict(parsed)
-                return (
-                    extracted
-                    if extracted is not None
-                    else (parsed if isinstance(parsed, dict) else None)
-                )
-            except json.JSONDecodeError:
-                continue
+                if extracted is not None:
+                    return extracted
+                if first_generic is None and isinstance(parsed, dict):
+                    first_generic = parsed
 
-    return None
+            return first_generic
+
+    first_generic: Optional[Dict[str, Any]] = None
+
+    parsed = _parse_candidate(text, first_generic)
+    if parsed is not None:
+        extracted = _extract_action_dict(parsed)
+        if extracted is not None:
+            return extracted
+        if isinstance(parsed, dict):
+            first_generic = parsed
+
+    fence = "```"
+    cursor = 0
+    while True:
+        start = text.find(fence, cursor)
+        if start == -1:
+            break
+        end = text.find(fence, start + len(fence))
+        if end == -1:
+            break
+
+        block = text[start + len(fence) : end].strip()
+        if block.lower().startswith("json"):
+            block = block[4:].strip()
+
+        parsed = _parse_candidate(block, first_generic)
+        if parsed is not None:
+            extracted = _extract_action_dict(parsed)
+            if extracted is not None:
+                return extracted
+            if first_generic is None and isinstance(parsed, dict):
+                first_generic = parsed
+
+        cursor = end + len(fence)
+
+    return first_generic
 
 
 def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
@@ -349,6 +443,41 @@ def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
         }.get(action_type.strip().lower(), action_type.strip().lower())
     else:
         action_type = "describe"
+
+    valid_action_types = {
+        "scale",
+        "delete_pod",
+        "patch",
+        "rollout_restart",
+        "set_hpa",
+        "drain_node",
+        "describe",
+        "wait",
+    }
+    if action_type not in valid_action_types:
+        # Recover from malformed outputs (e.g., action_type="backend").
+        if any(k in action for k in ("min_replicas", "max_replicas", "cpu_target_percent")):
+            inferred_action_type = "set_hpa"
+        elif "replicas" in action:
+            inferred_action_type = "scale"
+        elif "pod_name" in action:
+            inferred_action_type = "delete_pod"
+        elif "node_name" in action:
+            inferred_action_type = "drain_node"
+        elif "patch" in action:
+            inferred_action_type = "patch"
+        elif "resource_type" in action or "name" in action:
+            inferred_action_type = "describe"
+        elif "deployment" in action:
+            inferred_action_type = "rollout_restart"
+        else:
+            inferred_action_type = "describe"
+
+        debug_log(
+            f"Invalid action_type={action_type!r}; inferred action_type={inferred_action_type!r}."
+        )
+        action_type = inferred_action_type
+
     normalized: Dict[str, Any] = {"action_type": action_type}
 
     valid_resource_types = {
@@ -495,39 +624,57 @@ async def get_model_action(
     client: AsyncOpenAI, task_name: str, step: int, observation: Any, history: List[str]
 ) -> Dict[str, Any]:
     user_prompt = build_user_prompt(task_name, step, observation, history)
-
-    for attempt in range(5):  # retry once with stronger prompt
+    max_attempts = 5
+    for attempt in range(max_attempts):
         try:
             prompt = (
                 user_prompt
                 if attempt == 0
-                else (
-                    user_prompt
-                    + "\n\nCRITICAL: Reply with ONLY a JSON object. No other text whatsoever."
-                )
+                else user_prompt + "\n\nCRITICAL: Reply with ONLY a JSON object."
             )
+
             completion = await client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=TEMPERATURE if attempt == 0 else 0.0,
-                max_tokens=MAX_TOKENS,
                 stream=False,
+                temperature=TEMPERATURE,
+                max_tokens=MAX_TOKENS,
             )
-            text = (completion.choices[0].message.content or "").strip()
+
+            choice = completion.choices[0]
+            message = choice.message
+
+            text = _extract_visible_text(message)
+
+            if not text:
+                debug_log(
+                    f"Empty visible text (thinking model produced reasoning only?) "
+                    f"task={task_name} step={step} attempt={attempt + 1}/{max_attempts}"
+                )
+                continue
+
             parsed = _safe_json_action(text)
             if isinstance(parsed, dict):
                 return _normalize_action(parsed)
+
+            debug_log(
+                f"JSON parse failed task={task_name} step={step} "
+                f"attempt={attempt + 1}/{max_attempts} preview={text[:240]!r}"
+            )
+
         except Exception as exc:
-            print(f"Model request failed: {exc}", file=sys.stderr, flush=True)
-            if attempt == 1:
-                raise exc
+            debug_log(f"Model request failed: {exc}")
+            if attempt == max_attempts - 1:
+                raise
 
-    # If both attempts failed, fall back to a useful task-aware action.
-    return _normalize_action(_task_fallback_action(task_name, step, observation))
-
+    fallback = _normalize_action(_task_fallback_action(task_name, step, observation))
+    debug_log(
+        f"Using fallback action task={task_name} step={step}: {json.dumps(fallback, separators=(',', ':'))}"
+    )
+    return fallback
 
 async def main() -> None:
     if not API_KEY:
@@ -541,7 +688,6 @@ async def main() -> None:
 
         while True:
             max_steps = MAX_STEPS_BY_TASK.get(TASK_NAME, DEFAULT_MAX_STEPS)
-            grader = GRADERS.get(TASK_NAME, grade_pod_recovery)
 
             history: List[str] = []
             rewards: List[float] = []
@@ -549,8 +695,6 @@ async def main() -> None:
             score = 0.0
             success = False
             final_obs: Optional[Any] = None
-            episode_done = False
-            stalled = False
             should_retry_task = False
 
             log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
@@ -577,7 +721,6 @@ async def main() -> None:
                             client, TASK_NAME, step, final_obs, history
                         )
                         action = CoenvAction(**action_payload)
-
                         result = await env.step(action)
                         obs = result.observation
                         final_obs = obs
@@ -592,7 +735,6 @@ async def main() -> None:
 
                         rewards.append(reward)
                         steps_taken = step
-                        episode_done = bool(done)
 
                         action_str = json.dumps(action_payload, separators=(",", ":"))
                         log_step(
@@ -602,7 +744,6 @@ async def main() -> None:
                             done=done,
                             error=error,
                         )
-
                         history.append(
                             f"Step {step}: {action_str} -> reward {reward:+.2f}"
                         )
@@ -610,26 +751,18 @@ async def main() -> None:
                         if done:
                             break
             except websockets.exceptions.ConnectionClosedError as exc:
-                print(
-                    f"Connection closed unexpectedly for task={TASK_NAME}: {exc}",
-                    file=sys.stderr,
-                    flush=True,
+                debug_log(
+                    f"Connection closed unexpectedly for task={TASK_NAME}: {exc}"
                 )
-                stalled = True
                 should_retry_task = retries_left > 0
                 if should_retry_task:
-                    print(
-                        f"Retrying task={TASK_NAME} ({MAX_TASK_RETRIES_ON_CONNECTION_CLOSE - retries_left + 1}/{MAX_TASK_RETRIES_ON_CONNECTION_CLOSE})",
-                        file=sys.stderr,
-                        flush=True,
+                    debug_log(
+                        f"Retrying task={TASK_NAME} ({MAX_TASK_RETRIES_ON_CONNECTION_CLOSE - retries_left + 1}/{MAX_TASK_RETRIES_ON_CONNECTION_CLOSE})"
                     )
             except Exception as exc:
-                print(
+                debug_log(
                     f"Episode failed for task={TASK_NAME}: {exc}",
-                    file=sys.stderr,
-                    flush=True,
                 )
-                stalled = True
 
             finally:
                 score = sum(rewards) / len(rewards) if rewards else 0.0

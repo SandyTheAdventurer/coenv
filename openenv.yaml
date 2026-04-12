@@ -18,6 +18,12 @@ tasks:
     difficulty: medium
   - id: incident
     difficulty: hard
+  - id: security
+    difficulty: medium
+  - id: backup_recovery
+    difficulty: hard
+  - id: resource_optimization
+    difficulty: medium
 artifacts:
   action_schema: models.py
   observation_schema: models.py
