@@ -23,31 +23,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev
 
-      - name: Start server
-        run: |
-          uv run server > server.log 2>&1 &
-          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
-
-      - name: Wait for server
-        run: |
-          for _ in {1..30}; do
-            if curl -fsS -X POST http://localhost:8000/reset -H "Content-Type: application/json" -d '{}' >/dev/null; then
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "Server did not become ready in time"
-          cat server.log || true
-          exit 1
-
       - name: Run pre-submission validator
         run: |
           chmod +x ./pre-submission.sh
-          uv run ./pre-submission.sh http://localhost:8000 .
-
-      - name: Stop server
-        if: always()
-        run: |
-          if [ -n "${SERVER_PID:-}" ]; then
-            kill "$SERVER_PID" || true
-          fi
+          uv run ./pre-submission.sh https://Nightreigners-COEnv.hf.space .
