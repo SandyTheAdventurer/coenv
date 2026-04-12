@@ -5,44 +5,42 @@ Grader for Incident Task
 from typing import Dict, Any
 
 
+def _get_field(obj: Dict[str, Any], key: str, default: Any = None) -> Any:
+    """Get field from dict or Pydantic model."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump().get(key, default)
+    return obj.get(key, default)
+
+
 def grade(world_state: Dict[str, Any], step: int, max_steps: int) -> float:
     """Grade the incident task"""
     quality_score = 0.0
 
-    # Key services that should be healthy after incident resolution
     key_services = ["auth-service", "api-gateway", "frontend"]
     healthy_services = 0
 
+    deployments = world_state.get("deployments", [])
     for service_name in key_services:
-        # Check if deployment exists and has running pods
         deployment = next(
-            (
-                d
-                for d in world_state.get("deployments", [])
-                if d.get("name") == service_name
-            ),
+            (d for d in deployments if _get_field(d, "name") == service_name),
             None,
         )
         if deployment:
-            desired = deployment.get("desired_replicas", 0)
-            available = deployment.get("available_replicas", 0)
+            desired = _get_field(deployment, "desired_replicas", 0)
+            available = _get_field(deployment, "available_replicas", 0)
 
             if desired > 0:
-                # Consider service healthy if at least 80% of desired replicas are available
                 if available / desired >= 0.8:
                     healthy_services += 1
 
-    # Score based on proportion of healthy services
     if key_services:
         service_health_score = healthy_services / len(key_services)
-        quality_score += service_health_score * 0.6  # 60% for service health
+        quality_score += service_health_score * 0.6
 
-    # Check for absence of crashlooping pods in key services
-    key_service_pods = [
-        p for p in world_state.get("pods", []) if p.get("deployment") in key_services
-    ]
+    pods = world_state.get("pods", [])
+    key_service_pods = [p for p in pods if _get_field(p, "deployment") in key_services]
     crashloop_pods = [
-        p for p in key_service_pods if p.get("status") == "CrashLoopBackOff"
+        p for p in key_service_pods if _get_field(p, "status") == "CrashLoopBackOff"
     ]
 
     if key_service_pods:

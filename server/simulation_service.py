@@ -21,6 +21,25 @@ try:
 except ImportError:
     from models import CoenvAction, CoenvObservation, CoenvState
 
+try:
+    from .graders import (
+        pod_recovery_grade,
+        autoscaling_grade,
+        incident_grade,
+        security_grade,
+        backup_recovery_grade,
+        resource_optimization_grade,
+    )
+except ImportError:
+    from graders import (
+        pod_recovery_grade,
+        autoscaling_grade,
+        incident_grade,
+        security_grade,
+        backup_recovery_grade,
+        resource_optimization_grade,
+    )
+
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from config.json with sensible defaults."""
@@ -53,11 +72,11 @@ def load_config() -> Dict[str, Any]:
 def get_objective_for_task(task_id: str) -> str:
     """Get the objective string for a task."""
     objectives = {
-        "pod_recovery": "The frontend deployment is crash-looping. Diagnose and fix the root cause so that all pods reach Running state.",
-        "autoscaling": "Traffic has spiked 10x. The api-server deployment is overloaded. Configure autoscaling and ensure p95 latency stays below 500ms.",
-        "incident": "A cascading incident has degraded auth-service, api-gateway, and data-processor. Identify the root cause and restore all three services to healthy state without data loss.",
+        "pod_recovery": "The frontend deployment is crash-looping. The pods are in CrashLoopBackOff state and need to be restarted to recover.",
+        "autoscaling": "Traffic has spiked 10x. The backend deployment is experiencing OOM crashes due to overload. Configure Horizontal Pod Autoscaling (set_hpa) to handle the increased load, then restart any crashed pods.",
+        "incident": "A cascading incident has degraded auth-service, api-gateway, and frontend services. Multiple pods are in CrashLoopBackOff. Identify the failing services and restart them to restore.",
         "resource_optimization": "The cluster is over-provisioned! Nodes are underutilized (CPU <20%, Memory <30%). Reduce costs by downscaling unused replicas while maintaining service availability (SLA >99%).",
-        "security": "A security scan found sensitive data (API keys, passwords) exposed in environment variables. Rotate all credentials, move secrets to Kubernetes Secrets, and verify no credentials are leaked.",
+        "security": "A security scan found sensitive data (API keys, passwords) exposed in ConfigMaps. Move all credentials to Kubernetes Secrets and verify no sensitive data remains in ConfigMaps.",
         "backup_recovery": "The database PVC is in Lost state! The PersistentVolume is Available but the claim is broken. Restore data by recreating the PVC and ensuring the database pod mounts the correct volume.",
     }
     return objectives.get(task_id, "Maintain cluster health")
@@ -110,110 +129,138 @@ def get_condition_for_task(task_id: str, world: World, config: Dict[str, Any]):
     return None
 
 
-def calculate_reward(world: World, task_id: str) -> float:
-    """Calculate reward based on current state."""
-    if task_id == "pod_recovery":
-        pods = world.get_pods()
-        frontend_pods = [p for p in pods if p.deployment == "frontend"]
-        running = [p for p in frontend_pods if p.status == "Running"]
-        if frontend_pods:
-            return len(running) / len(frontend_pods)
+GRADERS: Dict[str, Any] = {
+    "pod_recovery": pod_recovery_grade,
+    "autoscaling": autoscaling_grade,
+    "incident": incident_grade,
+    "security": security_grade,
+    "backup_recovery": backup_recovery_grade,
+    "resource_optimization": resource_optimization_grade,
+}
 
-    elif task_id == "autoscaling":
-        pods = world.get_pods()
-        backend_pods = [p for p in pods if p.deployment == "backend"]
-        running = [p for p in backend_pods if p.status == "Running"]
-        if backend_pods:
-            running_ratio = min(len(running) / len(backend_pods), 1.0)
-            unstable = [
-                p
-                for p in backend_pods
-                if p.status != "Running" or getattr(p, "restarts", 0) >= 5
-            ]
-            stability_ratio = 1.0 - (len(unstable) / len(backend_pods))
 
-            hpas = world.get_hpas() if hasattr(world, "get_hpas") else []
-            backend_hpa = next((h for h in hpas if h.name == "backend-hpa"), None)
-            hpa_ok = (
-                backend_hpa is not None
-                and backend_hpa.min_replicas >= 2
-                and backend_hpa.max_replicas >= 6
-                and backend_hpa.cpu_target_percent <= 70
-            )
+def _get_field(obj: Any, key: str, default: Any = None) -> Any:
+    """Get field from dict or Pydantic model."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump().get(key, default)
+    if hasattr(obj, "get"):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
-            reward = (
-                (0.5 * running_ratio)
-                + (0.3 * stability_ratio)
-                + (0.2 * (1.0 if hpa_ok else 0.0))
-            )
-            return min(max(reward, 0.0), 1.0)
 
-    elif task_id == "incident":
-        pods = world.get_pods()
-        key_services = ["auth-service", "api-gateway", "frontend"]
-        healthy_count = 0
-        for svc in key_services:
-            svc_pods = [p for p in pods if p.deployment == svc]
-            running = [p for p in svc_pods if p.status == "Running"]
-            if svc_pods and len(running) >= len(svc_pods) * 0.8:
-                healthy_count += 1
-        return healthy_count / len(key_services) if key_services else 0.0
+def validate_action(action: CoenvAction, world: World) -> Optional[str]:
+    """Validate action before execution."""
+    world_state = world.get_full_state()
 
-    elif task_id == "security":
-        deployments = world.get_deployments()
-        configmaps = world.get_configmaps()
-        exposed_count = 0
-        sensitive_keys = {"API_KEY", "DB_PASSWORD", "JWT_SECRET", "SECRET", "PASSWORD"}
-        for cm in configmaps:
-            has_exposed = any(
-                k.upper() in sensitive_keys
-                or v in {"sk_live_", "p@ss", "secret", "超级"}
-                for k, v in cm.data.items()
-            )
-            if not has_exposed:
-                exposed_count += 1
-        secret_refs = world.get_secrets()
-        has_secrets = len(secret_refs) > 0
-        config_has_no_creds = exposed_count / len(configmaps) if configmaps else 1.0
-        return (0.4 * config_has_no_creds) + (0.6 * (1.0 if has_secrets else 0.0))
+    if action.action_type == "scale":
+        deployments = world_state.get("deployments", [])
+        deployment_names = [_get_field(d, "name") for d in deployments]
+        if action.deployment not in deployment_names:
+            return f"Deployment '{action.deployment}' not found. Available: {deployment_names}"
+        if action.replicas is not None and (
+            action.replicas < 1 or action.replicas > 20
+        ):
+            return f"Replica count must be between 1 and 20, got {action.replicas}"
 
-    elif task_id == "backup_recovery":
-        pvcs = world.get_persistentvolumeclaims()
-        database_pvc = next((p for p in pvcs if p.name == "database-pvc"), None)
-        pvs = world.get_persistentvolumes()
-        pv_database = next((p for p in pvs if p.name == "pv-database"), None)
-        if database_pvc and pv_database:
-            pvc_bound = database_pvc.status == "Bound"
-            pv_bound = pv_database.status == "Bound"
-            pods = world.get_pods()
-            db_pods = [p for p in pods if p.deployment == "database"]
-            db_running = len([p for p in db_pods if p.status == "Running"])
-            db_ready = db_running / len(db_pods) if db_pods else 0.0
-            return (
-                (0.3 * (1.0 if pvc_bound else 0.0))
-                + (0.3 * (1.0 if pv_bound else 0.0))
-                + (0.4 * db_ready)
-            )
+    elif action.action_type == "delete_pod":
+        pods = world_state.get("pods", [])
+        pod_names = [_get_field(p, "name") for p in pods]
+        if action.pod_name not in pod_names:
+            return f"Pod '{action.pod_name}' not found. Available: {pod_names}"
+
+    elif action.action_type == "patch":
+        resource_type = action.resource_type or ""
+        name = action.name or ""
+        if resource_type == "deployment":
+            deployments = world_state.get("deployments", [])
+            deployment_names = [_get_field(d, "name") for d in deployments]
+            if name not in deployment_names:
+                return f"Deployment '{name}' not found. Available: {deployment_names}"
+        elif resource_type == "configmap":
+            configmaps = world_state.get("configmaps", [])
+            configmap_names = [_get_field(c, "name") for c in configmaps]
+            if name not in configmap_names:
+                return f"ConfigMap '{name}' not found. Available: {configmap_names}"
+        elif resource_type == "service":
+            services = world_state.get("services", [])
+            service_names = [_get_field(s, "name") for s in services]
+            if name not in service_names:
+                return f"Service '{name}' not found. Available: {service_names}"
+
+    elif action.action_type == "rollout_restart":
+        deployments = world_state.get("deployments", [])
+        deployment_names = [_get_field(d, "name") for d in deployments]
+        if action.deployment not in deployment_names:
+            return f"Deployment '{action.deployment}' not found. Available: {deployment_names}"
+
+    elif action.action_type == "set_hpa":
+        deployments = world_state.get("deployments", [])
+        deployment_names = [_get_field(d, "name") for d in deployments]
+        if action.deployment not in deployment_names:
+            return f"Deployment '{action.deployment}' not found. Available: {deployment_names}"
+        if action.max_replicas is not None and action.min_replicas is not None:
+            if action.max_replicas < action.min_replicas:
+                return f"max_replicas ({action.max_replicas}) must be >= min_replicas ({action.min_replicas})"
+        if action.cpu_target_percent is not None:
+            if action.cpu_target_percent < 10 or action.cpu_target_percent > 90:
+                return f"cpu_target_percent must be between 10 and 90, got {action.cpu_target_percent}"
+
+    elif action.action_type == "drain_node":
+        nodes = world_state.get("nodes", [])
+        node_names = [_get_field(n, "name") for n in nodes]
+        if action.node_name not in node_names:
+            return f"Node '{action.node_name}' not found. Available: {node_names}"
+
+    elif action.action_type == "describe":
+        resource_type = action.resource_type or ""
+        name = action.name or ""
+        if resource_type == "deployment":
+            deployments = world_state.get("deployments", [])
+            deployment_names = [_get_field(d, "name") for d in deployments]
+            if name not in deployment_names:
+                return f"Deployment '{name}' not found. Available: {deployment_names}"
+        elif resource_type == "pod":
+            pods = world_state.get("pods", [])
+            pod_names = [_get_field(p, "name") for p in pods]
+            if name not in pod_names:
+                return f"Pod '{name}' not found. Available: {pod_names}"
+        elif resource_type == "node":
+            nodes = world_state.get("nodes", [])
+            node_names = [_get_field(n, "name") for n in nodes]
+            if name not in node_names:
+                return f"Node '{name}' not found. Available: {node_names}"
+        elif resource_type == "service":
+            services = world_state.get("services", [])
+            service_names = [_get_field(s, "name") for s in services]
+            if name not in service_names:
+                return f"Service '{name}' not found. Available: {service_names}"
+        elif resource_type == "configmap":
+            configmaps = world_state.get("configmaps", [])
+            configmap_names = [_get_field(c, "name") for c in configmaps]
+            if name not in configmap_names:
+                return f"ConfigMap '{name}' not found. Available: {configmap_names}"
+
+    return None
+
+
+GRADERS: Dict[str, Any] = {
+    "pod_recovery": pod_recovery_grade,
+    "autoscaling": autoscaling_grade,
+    "incident": incident_grade,
+    "security": security_grade,
+    "backup_recovery": backup_recovery_grade,
+    "resource_optimization": resource_optimization_grade,
+}
+
+
+def calculate_reward(world: World, task_id: str, step: int, max_steps: int) -> float:
+    """Calculate reward based on current state using graders."""
+    grader = GRADERS.get(task_id)
+    if grader is None:
         return 0.0
 
-    elif task_id == "resource_optimization":
-        nodes = world.get_nodes()
-        total_cpu = sum(n.cpu_usage for n in nodes) / len(nodes) if nodes else 100
-        total_mem = sum(n.mem_usage for n in nodes) / len(nodes) if nodes else 100
-        too_low = total_cpu < 20 or total_mem < 30
-        deployments = world.get_deployments()
-        total_replicas = sum(d.available_replicas for d in deployments)
-        ideal_replicas = 6
-        if total_replicas <= ideal_replicas and not too_low:
-            return 1.0
-        elif too_low:
-            savings_potential = (
-                1.0 - (ideal_replicas / total_replicas) if total_replicas > 0 else 0.0
-            )
-            return max(0.0, min(savings_potential, 0.7))
-        return 0.5
-
-    return 0.0
+    world_state = world.get_full_state()
+    return grader(world_state, step, max_steps)
 
 
 def _collect_task_metrics(world: World) -> Dict[str, Any]:
@@ -455,6 +502,22 @@ class CoenvEnvironment(Environment):
         """Apply one action, tick the world, and return updated observation with reward."""
         info: Dict[str, Any] = {}
 
+        validation_error = validate_action(action, self.world)
+        if validation_error:
+            info["error"] = validation_error
+            max_steps = (
+                self.config.get("tasks", {})
+                .get(self.current_task, {})
+                .get("max_steps", 15)
+            )
+            reward = calculate_reward(
+                self.world, self.current_task, self.world.step_count, max_steps
+            )
+            done = check_task_complete(
+                self.world, self.current_task, self._baseline_metrics
+            )
+            return self._observation(done=done, reward=reward, info=info)
+
         try:
             if action.action_type == "scale":
                 deployment = action.deployment or ""
@@ -518,13 +581,15 @@ class CoenvEnvironment(Environment):
 
         self.world.tick()
 
-        reward = calculate_reward(self.world, self.current_task)
+        max_steps = (
+            self.config.get("tasks", {}).get(self.current_task, {}).get("max_steps", 15)
+        )
+        reward = calculate_reward(
+            self.world, self.current_task, self.world.step_count, max_steps
+        )
 
         done = check_task_complete(
             self.world, self.current_task, self._baseline_metrics
-        )
-        max_steps = (
-            self.config.get("tasks", {}).get(self.current_task, {}).get("max_steps", 15)
         )
         truncated = self.world.step_count >= max_steps and not done
         if truncated:

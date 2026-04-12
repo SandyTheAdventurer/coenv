@@ -5,39 +5,66 @@ Grader for Autoscaling Task
 from typing import Dict, Any
 
 
+def _get_field(obj: Dict[str, Any], key: str, default: Any = None) -> Any:
+    """Get field from dict or Pydantic model."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump().get(key, default)
+    return obj.get(key, default)
+
+
 def grade(world_state: Dict[str, Any], step: int, max_steps: int) -> float:
     """Grade the autoscaling task"""
     quality_score = 0.0
 
-    # Check backend deployment status
+    deployments = world_state.get("deployments", [])
     backend_deployment = next(
-        (d for d in world_state.get("deployments", []) if d.get("name") == "backend"),
+        (d for d in deployments if _get_field(d, "name") == "backend"),
         None,
     )
     if not backend_deployment:
         return 0.0001
 
-    # Check if we have adequate replicas
-    desired = backend_deployment.get("desired_replicas", 0)
-    available = backend_deployment.get("available_replicas", 0)
+    desired = _get_field(backend_deployment, "desired_replicas", 0)
+    available = _get_field(backend_deployment, "available_replicas", 0)
 
     if desired > 0:
         replica_ratio = min(available / desired, 1.0)
-        quality_score += replica_ratio * 0.4  # 40% for proper scaling
+        quality_score += replica_ratio * 0.4
 
-    # Check backend pod health
+    hpas = world_state.get("hpas", [])
+    backend_hpa = next(
+        (h for h in hpas if _get_field(h, "name") == "backend-hpa"),
+        None,
+    )
+    hpa_ok = (
+        backend_hpa is not None
+        and _get_field(backend_hpa, "min_replicas", 0) >= 2
+        and _get_field(backend_hpa, "max_replicas", 0) >= 6
+        and _get_field(backend_hpa, "cpu_target_percent", 100) <= 70
+    )
+    if hpa_ok:
+        quality_score += 0.2
+
+    pods = world_state.get("pods", [])
     backend_pods = [
         p
-        for p in world_state.get("pods", [])
-        if p.get("deployment") == "backend" and p.get("status") == "Running"
+        for p in pods
+        if _get_field(p, "deployment") == "backend"
+        and _get_field(p, "status") == "Running"
     ]
-    total_backend_pods = [
-        p for p in world_state.get("pods", []) if p.get("deployment") == "backend"
-    ]
+    total_backend_pods = [p for p in pods if _get_field(p, "deployment") == "backend"]
 
     if total_backend_pods:
         health_ratio = len(backend_pods) / len(total_backend_pods)
-        quality_score += health_ratio * 0.4  # 40% for pod health
+        quality_score += health_ratio * 0.4
+
+        unstable = [
+            p
+            for p in total_backend_pods
+            if _get_field(p, "status") != "Running" or _get_field(p, "restarts", 0) >= 5
+        ]
+        stability_ratio = 1.0 - (len(unstable) / len(total_backend_pods))
+        quality_score += stability_ratio * 0.2
 
     # Strong step penalty: longer trajectories are penalized quadratically.
     if max_steps > 0:

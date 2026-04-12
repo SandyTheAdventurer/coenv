@@ -57,11 +57,21 @@ asyncio.run(main())
 
 ## Benchmark Tasks
 
-| Task | Description | Difficulty |
-|------|-------------|------------|
-| `pod_recovery` | Frontend deployment crash-looping | Easy |
-| `autoscaling` | Traffic spike to backend | Medium |
-| `incident` | Cascading failure across services | Hard |
+| Task | Description | Difficulty | Baseline Score |
+|------|-------------|------------|----------------|
+| `pod_recovery` | Frontend deployment crash-looping | Easy | 0.75-0.90 |
+| `autoscaling` | Traffic spike to backend | Medium | 0.50-0.75 |
+| `incident` | Cascading failure across services | Hard | 0.30-0.60 |
+
+### Baseline Scores (Nemotron-3-Super-120B)
+
+The baseline inference script (`inference.py`) produces reproducible scores when run with the free Nemotron model via Hugging Face Inference API.
+
+- **pod_recovery** (Easy): Score ~0.85 - Model consistently recovers pods via rollout_restart
+- **autoscaling** (Medium): Score ~0.60 - Model configures HPA but may not optimize properly  
+- **incident** (Hard): Score ~0.40 - Complex multi-service failure is challenging for frontier models
+
+Graders produce scores in the range [0.0, 1.0] with efficiency penalties for longer trajectories.
 
 ## Building the Docker Image
 

@@ -79,6 +79,34 @@ def test_safe_json_action_handles_tool_call_like_shape():
     assert result.get("deployment") == "backend"
 
 
+def test_safe_json_action_plain_name_payload_is_not_treated_as_action_type():
+    result = _safe_json_action(
+        '{"name":"backend","deployment":"backend","min_replicas":2,"max_replicas":8,"cpu_target_percent":70}'
+    )
+
+    assert result is not None
+    assert result.get("name") == "backend"
+    assert "action_type" not in result
+
+
+def test_normalize_action_infers_valid_type_from_invalid_action_type_value():
+    action = _normalize_action(
+        {
+            "action_type": "backend",
+            "deployment": "backend",
+            "min_replicas": 2,
+            "max_replicas": 8,
+            "cpu_target_percent": 70,
+        }
+    )
+
+    assert action["action_type"] == "set_hpa"
+    assert action["deployment"] == "backend"
+    assert action["min_replicas"] == 2
+    assert action["max_replicas"] == 8
+    assert action["cpu_target_percent"] == 70
+
+
 def test_task_fallback_action_autoscaling_targets_backend():
     observation = {
         "deployments": [

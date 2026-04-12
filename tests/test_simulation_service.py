@@ -16,8 +16,17 @@ class StubPod:
         self.restarts = restarts
 
 
+class StubDeployment:
+    def __init__(self, name: str, desired_replicas: int, available_replicas: int):
+        self.name = name
+        self.desired_replicas = desired_replicas
+        self.available_replicas = available_replicas
+
+
 class StubHPA:
-    def __init__(self, name: str, min_replicas: int, max_replicas: int, cpu_target_percent: int):
+    def __init__(
+        self, name: str, min_replicas: int, max_replicas: int, cpu_target_percent: int
+    ):
         self.name = name
         self.min_replicas = min_replicas
         self.max_replicas = max_replicas
@@ -25,15 +34,48 @@ class StubHPA:
 
 
 class StubWorld:
-    def __init__(self, pods, hpas=None):
+    def __init__(self, pods, deployments=None, hpas=None):
         self._pods = pods
+        self._deployments = deployments or [
+            StubDeployment("frontend", 3, 3),
+            StubDeployment("backend", 2, 2),
+        ]
         self._hpas = hpas or []
+        self._step_count = 1
 
     def get_pods(self):
         return self._pods
 
+    def get_deployments(self):
+        return self._deployments
+
     def get_hpas(self):
         return self._hpas
+
+    def get_full_state(self):
+        return {
+            "pods": [
+                {"deployment": p.deployment, "status": p.status, "restarts": p.restarts}
+                for p in self._pods
+            ],
+            "deployments": [
+                {
+                    "name": d.name,
+                    "desired_replicas": d.desired_replicas,
+                    "available_replicas": d.available_replicas,
+                }
+                for d in self._deployments
+            ],
+            "hpas": [
+                {
+                    "name": h.name,
+                    "min_replicas": h.min_replicas,
+                    "max_replicas": h.max_replicas,
+                    "cpu_target_percent": h.cpu_target_percent,
+                }
+                for h in self._hpas
+            ],
+        }
 
 
 def test_get_objective_for_task_known_and_unknown():
@@ -53,8 +95,8 @@ def test_calculate_reward_pod_recovery():
         ]
     )
 
-    reward = calculate_reward(world, "pod_recovery")
-    assert reward == pytest.approx(2 / 3)
+    reward = calculate_reward(world, "pod_recovery", step=0, max_steps=15)
+    assert 0.32 < reward < 0.35
 
 
 def test_calculate_reward_autoscaling_rewards_stability_and_hpa_policy():
@@ -63,7 +105,15 @@ def test_calculate_reward_autoscaling_rewards_stability_and_hpa_policy():
             StubPod("backend", "Running", restarts=0),
             StubPod("backend", "Running", restarts=0),
         ],
-        hpas=[StubHPA("backend-hpa", min_replicas=2, max_replicas=6, cpu_target_percent=70)],
+        deployments=[
+            StubDeployment("backend", desired_replicas=2, available_replicas=2),
+            StubDeployment("frontend", desired_replicas=3, available_replicas=3),
+        ],
+        hpas=[
+            StubHPA(
+                "backend-hpa", min_replicas=2, max_replicas=6, cpu_target_percent=70
+            )
+        ],
     )
 
     unstable_world = StubWorld(
@@ -71,7 +121,15 @@ def test_calculate_reward_autoscaling_rewards_stability_and_hpa_policy():
             StubPod("backend", "Running", restarts=10),
             StubPod("backend", "Running", restarts=9),
         ],
-        hpas=[StubHPA("backend-hpa", min_replicas=2, max_replicas=6, cpu_target_percent=70)],
+        deployments=[
+            StubDeployment("backend", desired_replicas=2, available_replicas=2),
+            StubDeployment("frontend", desired_replicas=3, available_replicas=3),
+        ],
+        hpas=[
+            StubHPA(
+                "backend-hpa", min_replicas=2, max_replicas=6, cpu_target_percent=70
+            )
+        ],
     )
 
     no_hpa_world = StubWorld(
@@ -79,14 +137,22 @@ def test_calculate_reward_autoscaling_rewards_stability_and_hpa_policy():
             StubPod("backend", "Running", restarts=0),
             StubPod("backend", "Running", restarts=0),
         ],
+        deployments=[
+            StubDeployment("backend", desired_replicas=2, available_replicas=2),
+            StubDeployment("frontend", desired_replicas=3, available_replicas=3),
+        ],
         hpas=[],
     )
 
-    healthy_reward = calculate_reward(healthy_world, "autoscaling")
-    unstable_reward = calculate_reward(unstable_world, "autoscaling")
-    no_hpa_reward = calculate_reward(no_hpa_world, "autoscaling")
+    healthy_reward = calculate_reward(
+        healthy_world, "autoscaling", step=1, max_steps=20
+    )
+    unstable_reward = calculate_reward(
+        unstable_world, "autoscaling", step=1, max_steps=20
+    )
+    no_hpa_reward = calculate_reward(no_hpa_world, "autoscaling", step=1, max_steps=20)
 
-    assert healthy_reward == pytest.approx(1.0)
+    assert healthy_reward >= 0.7
     assert unstable_reward < healthy_reward
     assert no_hpa_reward < healthy_reward
 

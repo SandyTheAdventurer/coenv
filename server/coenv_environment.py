@@ -200,18 +200,6 @@ class World:
                 }
             )
 
-        for hpa in default_hpas:
-            hpas.append(
-                {
-                    "name": hpa["name"],
-                    "min_replicas": hpa["min_replicas"],
-                    "max_replicas": hpa["max_replicas"],
-                    "current_replicas": hpa["min_replicas"],
-                    "cpu_target_percent": hpa["cpu_target_percent"],
-                    "last_updated": datetime.now().isoformat(),
-                }
-            )
-
         # Create secrets
         default_secrets = [
             {
