@@ -93,6 +93,10 @@
             
             <li class="nav-item" data-bs-level="1"><a href="#coenv" class="nav-link">coenv</a>
               <ul class="nav flex-column">
+            <li class="nav-item" data-bs-level="2"><a href="#motivation" class="nav-link">Motivation</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
             <li class="nav-item" data-bs-level="2"><a href="#features" class="nav-link">Features</a>
               <ul class="nav flex-column">
               </ul>
@@ -122,6 +126,8 @@
 
 <h1 id="coenv">coenv<a class="headerlink" href="#coenv" title="Permanent link">&para;</a></h1>
 <p>A Kubernetes cluster simulation environment for OpenEnv. Provides a testbed for building and evaluating LLM agents that manage Kubernetes clusters.</p>
+<h2 id="motivation">Motivation<a class="headerlink" href="#motivation" title="Permanent link">&para;</a></h2>
+<p>As organizations increasingly adopt Kubernetes for container orchestration, the need for intelligent automation in cluster management grows. This environment provides a safe, reproducible testbed for developing and evaluating LLM-based agents that can learn to diagnose and resolve common Kubernetes operational issues, from simple pod recoveries to complex multi-service incidents.</p>
 <h2 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Simulated Kubernetes Cluster</strong>: Full cluster simulation including nodes, pods, deployments, services, ConfigMaps, and HPAs</li>
@@ -190,6 +196,14 @@
 </tr>
 </tbody>
 </table>
+<h3 id="baseline-scores-nemotron-3-super-120b">Baseline Scores (Nemotron-3-Super-120B)<a class="headerlink" href="#baseline-scores-nemotron-3-super-120b" title="Permanent link">&para;</a></h3>
+<p>The baseline inference script (<code>inference.py</code>) produces reproducible scores when run with the free Nemotron model via Hugging Face Inference API.</p>
+<ul>
+<li><strong>pod_recovery</strong> (Easy): Score ~0.85 - Model consistently recovers pods via rollout_restart</li>
+<li><strong>autoscaling</strong> (Medium): Score ~0.60 - Model configures HPA but may not optimize properly  </li>
+<li><strong>incident</strong> (Hard): Score ~0.40 - Complex multi-service failure is challenging for frontier models</li>
+</ul>
+<p>Graders produce scores in the range [0.0, 1.0] with efficiency penalties for longer trajectories.</p>
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="getting-started/">Getting Started</a> - Set up and run</li>
@@ -280,5 +294,5 @@
 
 <!--
 MkDocs version : 1.6.1
-Build Date UTC : 2026-04-09 06:48:55.487891+00:00
+Build Date UTC : 2026-04-12 19:32:42.123946+00:00
 -->
