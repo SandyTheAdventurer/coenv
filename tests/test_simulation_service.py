@@ -223,3 +223,19 @@ def test_environment_step_exception_is_captured_in_metadata(monkeypatch):
     obs = env.step(action)
     assert "error" in obs.metadata
     assert "forced failure" in obs.metadata["error"]
+
+
+def test_environment_invalid_action_advances_step_and_sets_metadata():
+    env = CoenvEnvironment()
+    env.reset(task="pod_recovery")
+
+    initial_step = env.world.step_count
+    obs = env.step(
+        CoenvAction(action_type="describe", resource_type="pod", name="missing-pod")
+    )
+
+    assert obs.metadata.get("invalid_action") is True
+    assert "error" in obs.metadata
+    assert "not found" in obs.metadata["error"]
+    assert env.world.step_count == initial_step + 1
+    assert obs.step == initial_step + 1
