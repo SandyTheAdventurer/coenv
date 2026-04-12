@@ -95,3 +95,23 @@ uv run python inference.py
 - [Models](./models.md) - Data models
 - [Client](./client.md) - Python client
 - [Deployment](./deployment.md) - Deploy to HuggingFace Spaces
+
+## Building Documentation
+
+This project uses MkDocs with Material theme for documentation.
+
+```bash
+# Install dependencies (if not already installed)
+uv sync
+
+# Serve documentation locally (with live reload)
+mkdocs serve
+
+# Build static documentation
+mkdocs build
+
+# Deploy to GitHub Pages
+mkdocs gh-deploy
+```
+
+For more details, see `mkdocs.yml` configuration.
