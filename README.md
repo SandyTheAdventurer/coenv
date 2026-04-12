@@ -17,6 +17,10 @@ tags:
 
 A Kubernetes cluster simulation environment for OpenEnv. Provides a testbed for building and evaluating LLM agents that manage Kubernetes clusters through realistic scenarios.
 
+## Motivation
+
+As organizations increasingly adopt Kubernetes for container orchestration, the need for intelligent automation in cluster management grows. This environment provides a safe, reproducible testbed for developing and evaluating LLM-based agents that can learn to diagnose and resolve common Kubernetes operational issues, from simple pod recoveries to complex multi-service incidents.
+
 Documentation: https://sandytheadventurer.github.io/coenv/
 
 ## Features
@@ -109,16 +113,23 @@ Options:
 | `describe` | Get detailed info about a resource | No |
 | `wait` | Wait one simulation tick | Yes |
 
-## Observation
+## Observation Space
+
+The observation space consists of the current state of the simulated Kubernetes cluster:
 
 **CoenvObservation** contains:
-
-- `nodes`, `pods`, `deployments`, `services`, `configmaps`, `hpas`, `events`
+- `nodes`: List of node statuses (name, status, CPU/memory capacity and usage)
+- `pods`: List of pod statuses (name, status, node, restarts, resource requests/limits)
+- `deployments`: List of deployment statuses (name, desired/available replicas, image)
+- `services`: List of service statuses (name, type, ports, selector, cluster IP)
+- `configmaps`: List of config map statuses (name, data)
+- `hpas`: List of HPA statuses (name, min/max/current replicas, CPU target)
+- `events`: List of cluster events (event ID, timestamp, type, reason, message)
 - `step` (int): Current simulation step
 - `objective` (str): Current task objective
 
 With `StepResult` containing:
-- `reward` (float): Computed reward for the action
+- `reward` (float): Computed reward for the action (range [0.0, 1.0])
 - `done` (bool): Whether the task is complete
 
 ## Reward
