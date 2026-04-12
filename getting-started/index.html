@@ -125,6 +125,10 @@
               <ul class="nav flex-column">
               </ul>
             </li>
+            <li class="nav-item" data-bs-level="2"><a href="#building-documentation" class="nav-link">Building Documentation</a>
+              <ul class="nav flex-column">
+              </ul>
+            </li>
               </ul>
             </li>
         </ul>
@@ -225,7 +229,22 @@
 <li><a href="../models/">Models</a> - Data models</li>
 <li><a href="../client/">Client</a> - Python client</li>
 <li><a href="../deployment/">Deployment</a> - Deploy to HuggingFace Spaces</li>
-</ul></div>
+</ul>
+<h2 id="building-documentation">Building Documentation<a class="headerlink" href="#building-documentation" title="Permanent link">&para;</a></h2>
+<p>This project uses MkDocs with Material theme for documentation.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install dependencies (if not already installed)</span>
+uv<span class="w"> </span>sync
+
+<span class="c1"># Serve documentation locally (with live reload)</span>
+mkdocs<span class="w"> </span>serve
+
+<span class="c1"># Build static documentation</span>
+mkdocs<span class="w"> </span>build
+
+<span class="c1"># Deploy to GitHub Pages</span>
+mkdocs<span class="w"> </span>gh-deploy
+</code></pre></div>
+<p>For more details, see <code>mkdocs.yml</code> configuration.</p></div>
             </div>
         </div>
 
