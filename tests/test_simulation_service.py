@@ -5,6 +5,7 @@ from server.simulation_service import (
     calculate_reward,
     check_task_complete,
     get_objective_for_task,
+    shape_reward,
 )
 from models import CoenvAction
 
@@ -155,6 +156,63 @@ def test_calculate_reward_autoscaling_rewards_stability_and_hpa_policy():
     assert healthy_reward >= 0.7
     assert unstable_reward < healthy_reward
     assert no_hpa_reward < healthy_reward
+
+
+def test_shape_reward_boosts_improvement_and_penalizes_regression():
+    improved = shape_reward(
+        base_reward=0.70,
+        previous_base_reward=0.40,
+        action_type="scale",
+    )
+    regressed = shape_reward(
+        base_reward=0.40,
+        previous_base_reward=0.70,
+        action_type="scale",
+    )
+
+    assert improved > 0.70
+    assert regressed < 0.40
+
+
+def test_shape_reward_penalizes_passive_invalid_and_error_actions():
+    valid_reward = shape_reward(
+        base_reward=0.60,
+        previous_base_reward=0.60,
+        action_type="scale",
+    )
+    passive_reward = shape_reward(
+        base_reward=0.60,
+        previous_base_reward=0.60,
+        action_type="wait",
+    )
+    invalid_reward = shape_reward(
+        base_reward=0.60,
+        previous_base_reward=0.60,
+        action_type="scale",
+        invalid_action=True,
+    )
+    error_reward = shape_reward(
+        base_reward=0.60,
+        previous_base_reward=0.60,
+        action_type="scale",
+        had_error=True,
+    )
+
+    assert passive_reward < valid_reward
+    assert invalid_reward < passive_reward
+    assert error_reward < valid_reward
+
+
+def test_shape_reward_can_be_negative_for_severe_regression():
+    severe_penalty = shape_reward(
+        base_reward=0.05,
+        previous_base_reward=0.95,
+        action_type="wait",
+        invalid_action=True,
+        had_error=True,
+    )
+
+    assert severe_penalty < 0.0
 
 
 def test_check_task_complete_incident_true_and_false():
