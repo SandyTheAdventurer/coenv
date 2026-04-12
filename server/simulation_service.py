@@ -139,6 +139,15 @@ GRADERS: Dict[str, Any] = {
     "resource_optimization": resource_optimization_grade,
 }
 
+MIN_REWARD = -0.9999
+MAX_REWARD = 0.9999
+PROGRESS_BONUS_WEIGHT = 0.35
+REGRESSION_PENALTY_WEIGHT = 0.45
+PASSIVE_ACTION_PENALTY = 0.015
+INVALID_ACTION_PENALTY = 0.10
+ERROR_ACTION_PENALTY = 0.06
+PASSIVE_ACTIONS = {"wait", "describe"}
+
 
 def _get_field(obj: Any, key: str, default: Any = None) -> Any:
     """Get field from dict or Pydantic model."""
@@ -267,6 +276,38 @@ def calculate_reward(world: World, task_id: str, step: int, max_steps: int) -> f
 
     world_state = world.get_full_state()
     return grader(world_state, step, max_steps)
+
+
+def _clamp_reward(reward: float) -> float:
+    """Clamp shaped reward into a bounded signed interval."""
+    return max(MIN_REWARD, min(reward, MAX_REWARD))
+
+
+def shape_reward(
+    base_reward: float,
+    previous_base_reward: float,
+    action_type: Optional[str],
+    *,
+    invalid_action: bool = False,
+    had_error: bool = False,
+) -> float:
+    """Shape reward with progress deltas and action quality penalties."""
+    delta = base_reward - previous_base_reward
+    shaped_reward = base_reward
+
+    if delta > 0:
+        shaped_reward += delta * PROGRESS_BONUS_WEIGHT
+    elif delta < 0:
+        shaped_reward -= abs(delta) * REGRESSION_PENALTY_WEIGHT
+
+    if action_type in PASSIVE_ACTIONS:
+        shaped_reward -= PASSIVE_ACTION_PENALTY
+    if invalid_action:
+        shaped_reward -= INVALID_ACTION_PENALTY
+    if had_error:
+        shaped_reward -= ERROR_ACTION_PENALTY
+
+    return _clamp_reward(shaped_reward)
 
 
 def _collect_task_metrics(world: World) -> Dict[str, Any]:
@@ -467,12 +508,14 @@ class CoenvEnvironment(Environment):
         self.current_task = "pod_recovery"
         self.current_objective = get_objective_for_task(self.current_task)
         self._baseline_metrics: Dict[str, Any] = {}
+        self._last_base_reward: float = 0.0
 
     def reset(self, task: str = "pod_recovery", **_: Any) -> CoenvObservation:
         """Reset simulator state for the selected task and return initial observation."""
         self.current_task = task
         self.current_objective = get_objective_for_task(task)
         condition = get_condition_for_task(task, self.world, self.config)
+        self._baseline_metrics = {}
 
         self.world.reset_to_healthy()
         if condition is not None:
@@ -502,6 +545,13 @@ class CoenvEnvironment(Environment):
                 condition.inject()
             self._baseline_metrics = _collect_task_metrics(self.world)
 
+        max_steps = (
+            self.config.get("tasks", {}).get(self.current_task, {}).get("max_steps", 15)
+        )
+        self._last_base_reward = calculate_reward(
+            self.world, self.current_task, self.world.step_count, max_steps
+        )
+
         return self._observation(done=False, reward=0.0, info={"task": task})
 
     def step(self, action: CoenvAction, **_: Any) -> CoenvObservation:
@@ -524,16 +574,23 @@ class CoenvEnvironment(Environment):
             reward = calculate_reward(
                 self.world, self.current_task, self.world.step_count, max_steps
             )
+            shaped_reward = shape_reward(
+                reward,
+                self._last_base_reward,
+                action.action_type,
+                invalid_action=True,
+            )
             done = check_task_complete(
                 self.world, self.current_task, self._baseline_metrics
             )
+            self._last_base_reward = reward
 
             truncated = self.world.step_count >= max_steps and not done
             if truncated:
                 info["truncated"] = True
                 done = True
 
-            return self._observation(done=done, reward=reward, info=info)
+            return self._observation(done=done, reward=shaped_reward, info=info)
 
         try:
             if action.action_type == "scale":
@@ -614,16 +671,23 @@ class CoenvEnvironment(Environment):
         reward = calculate_reward(
             self.world, self.current_task, self.world.step_count, max_steps
         )
+        shaped_reward = shape_reward(
+            reward,
+            self._last_base_reward,
+            action.action_type,
+            had_error="error" in info,
+        )
 
         done = check_task_complete(
             self.world, self.current_task, self._baseline_metrics
         )
+        self._last_base_reward = reward
         truncated = self.world.step_count >= max_steps and not done
         if truncated:
             info["truncated"] = True
             done = True
 
-        return self._observation(done=done, reward=reward, info=info)
+        return self._observation(done=done, reward=shaped_reward, info=info)
 
     @property
     def state(self) -> CoenvState:
