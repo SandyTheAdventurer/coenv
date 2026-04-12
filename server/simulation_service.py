@@ -505,6 +505,11 @@ class CoenvEnvironment(Environment):
         validation_error = validate_action(action, self.world)
         if validation_error:
             info["error"] = validation_error
+            info["invalid_action"] = True
+
+            # Invalid actions still consume a step so episodes make progress and can truncate.
+            self.world.tick()
+
             max_steps = (
                 self.config.get("tasks", {})
                 .get(self.current_task, {})
@@ -516,6 +521,12 @@ class CoenvEnvironment(Environment):
             done = check_task_complete(
                 self.world, self.current_task, self._baseline_metrics
             )
+
+            truncated = self.world.step_count >= max_steps and not done
+            if truncated:
+                info["truncated"] = True
+                done = True
+
             return self._observation(done=done, reward=reward, info=info)
 
         try:
